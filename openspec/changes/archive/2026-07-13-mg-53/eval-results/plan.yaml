@@ -1,0 +1,26 @@
+artifact_id: plan
+artifact_path: openspec/changes/mg-53/plan.md
+stage: plan
+stage_eval_file: evals/plan_eval.yaml
+scored_at: "2026-07-13T04:05:00Z"
+overall_score: 100
+overall_pass: true
+refinement_applied: false
+constitution_resolved: openspec/changes/mg-53/inputs/constitution.md
+cases:
+  - id: eval-r001-plan-001
+    score: 100
+    pass: true
+    failures: []
+  - id: eval-r001-plan-002
+    score: 100
+    pass: true
+    failures: []
+  - id: eval-r001-plan-003
+    score: 100
+    pass: true
+    failures: []
+  - id: eval-r001-plan-004
+    score: 100
+    pass: true
+    failures: []

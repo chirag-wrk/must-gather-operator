@@ -18,10 +18,10 @@ package mustgather
 
 import (
 	"context"
-	goerror "errors"
 	"fmt"
 	"os"
 	"reflect"
+	"strings"
 
 	"github.com/go-logr/logr"
 	configv1 "github.com/openshift/api/config/v1"
@@ -29,10 +29,12 @@ import (
 	"github.com/openshift/must-gather-operator/pkg/k8sutil"
 	"github.com/openshift/must-gather-operator/pkg/localmetrics"
 	"github.com/redhat-cop/operator-utils/pkg/util"
+	"github.com/redhat-cop/operator-utils/pkg/util/apis"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -44,6 +46,13 @@ const (
 	ControllerName = "mustgather-controller"
 
 	defaultMustGatherNamespace = "must-gather-operator"
+
+	operatorImageEnv = "OPERATOR_IMAGE"
+
+	ConditionUploadConfigurationInvalid = "UploadConfigurationInvalid"
+	ConditionUploadCredentialsInvalid     = "UploadCredentialsInvalid"
+	ConditionUploadOperatorConfigInvalid  = "UploadOperatorConfigInvalid"
+	ConditionUploadJobFailed              = "UploadJobFailed"
 )
 
 var log = logf.Log.WithName(ControllerName)
@@ -122,20 +131,24 @@ func (r *MustGatherReconciler) Reconcile(ctx context.Context, request reconcile.
 			// finalization logic fails, don't remove the finalizer so
 			// that we can retry during the next reconciliation.
 
-			// delete secret in the operator namespace
-			tmpSecretName := instance.Spec.CaseManagementAccountSecretRef.Name
-			tmpSecret := &corev1.Secret{}
-			err = r.GetClient().Get(context.TODO(), types.NamespacedName{
-				Namespace: operatorNs,
-				Name:      tmpSecretName,
-			}, tmpSecret)
-			if err != nil {
-				reqLogger.Error(err, fmt.Sprintf("Failed to get %s secret", tmpSecretName))
-			} else {
-				err = r.GetClient().Delete(context.TODO(), tmpSecret)
-				if err != nil {
-					reqLogger.Error(err, fmt.Sprintf("Failed to delete %s secret", tmpSecretName))
-					return reconcile.Result{}, err
+			// delete secret in the operator namespace when upload was configured
+			if uploadEnabled(*instance) {
+				tmpSecretName := uploadSecretName(instance)
+				if tmpSecretName != "" {
+					tmpSecret := &corev1.Secret{}
+					err = r.GetClient().Get(context.TODO(), types.NamespacedName{
+						Namespace: operatorNs,
+						Name:      tmpSecretName,
+					}, tmpSecret)
+					if err != nil {
+						reqLogger.Error(err, fmt.Sprintf("Failed to get %s secret", tmpSecretName))
+					} else {
+						err = r.GetClient().Delete(context.TODO(), tmpSecret)
+						if err != nil {
+							reqLogger.Error(err, fmt.Sprintf("Failed to delete %s secret", tmpSecretName))
+							return reconcile.Result{}, err
+						}
+					}
 				}
 			}
 
@@ -192,6 +205,10 @@ func (r *MustGatherReconciler) Reconcile(ctx context.Context, request reconcile.
 		}
 	}
 
+	if conditionType, reason, message, ok := validateReconcilePrerequisites(instance); !ok {
+		return r.manageUploadCondition(context.TODO(), instance, conditionType, reason, message)
+	}
+
 	job, err := r.getJobFromInstance(instance)
 	if err != nil {
 		log.Error(err, "unable to get job from", "instance", instance)
@@ -206,41 +223,48 @@ func (r *MustGatherReconciler) Reconcile(ctx context.Context, request reconcile.
 
 	if err != nil {
 		if errors.IsNotFound(err) {
-			// look up user secret and copy it to operator namespace
-			secretName := instance.Spec.CaseManagementAccountSecretRef.Name
-			userSecret := &corev1.Secret{}
-			err = r.GetClient().Get(context.TODO(), types.NamespacedName{
-				Namespace: instance.Namespace,
-				Name:      secretName,
-			}, userSecret)
-			if err != nil {
-				log.Info(fmt.Sprintf("Error getting secret (%s)!", instance.Spec.CaseManagementAccountSecretRef.Name))
-				return reconcile.Result{}, err
-			}
+			if uploadEnabled(*instance) {
+				// look up user secret and copy it to operator namespace
+				secretName := uploadSecretName(instance)
+				userSecret := &corev1.Secret{}
+				err = r.GetClient().Get(context.TODO(), types.NamespacedName{
+					Namespace: instance.Namespace,
+					Name:      secretName,
+				}, userSecret)
+				if err != nil {
+					if errors.IsNotFound(err) {
+						msg := fmt.Sprintf("upload credentials secret %q not found in namespace %q", secretName, instance.Namespace)
+						return r.manageUploadCondition(context.TODO(), instance, ConditionUploadCredentialsInvalid, "SecretNotFound", msg)
+					}
+					log.Info(fmt.Sprintf("Error getting secret (%s)!", secretName))
+					return reconcile.Result{}, err
+				}
 
-			// create secret in the operator namespace
-			newSecret := &corev1.Secret{}
-			err = r.GetClient().Get(context.TODO(), types.NamespacedName{
-				Namespace: operatorNs,
-				Name:      secretName,
-			}, newSecret)
-			if err != nil {
-				if errors.IsNotFound(err) {
-					newSecret.Name = secretName
-					newSecret.Namespace = operatorNs
-					newSecret.Data = userSecret.Data
-					newSecret.Type = userSecret.Type
-					err = r.GetClient().Create(context.TODO(), newSecret)
-					if err != nil {
-						log.Error(err, fmt.Sprintf("Error creating new secret %s", secretName))
+				// create secret in the operator namespace
+				newSecret := &corev1.Secret{}
+				err = r.GetClient().Get(context.TODO(), types.NamespacedName{
+					Namespace: operatorNs,
+					Name:      secretName,
+				}, newSecret)
+				if err != nil {
+					if errors.IsNotFound(err) {
+						newSecret.Name = secretName
+						newSecret.Namespace = operatorNs
+						newSecret.Data = userSecret.Data
+						newSecret.Type = userSecret.Type
+						err = r.GetClient().Create(context.TODO(), newSecret)
+						if err != nil {
+							log.Error(err, fmt.Sprintf("Error creating new secret %s", secretName))
+							return reconcile.Result{}, err
+						}
+					} else {
+						log.Error(err, fmt.Sprintf("Error getting new secret %s", secretName))
 						return reconcile.Result{}, err
 					}
 				} else {
-					log.Error(err, fmt.Sprintf("Error getting new secret %s", secretName))
-					return reconcile.Result{}, err
+					log.Info(fmt.Sprintf("Secret %s already exists in the %s namespace", secretName, operatorNs))
 				}
 			}
-			log.Info(fmt.Sprintf("Secret %s already exists in the %s namespace", secretName, operatorNs))
 
 			// job is not there, create it.
 			err = r.CreateResourceIfNotExists(context.TODO(), instance, operatorNs, job)
@@ -273,8 +297,11 @@ func (r *MustGatherReconciler) Reconcile(ctx context.Context, request reconcile.
 		}
 		if job1.Status.Failed > 0 && instance.GetDeletionTimestamp() == nil {
 			reqLogger.Info("MustGather Job pods failed")
-			// Increment prometheus metrics for must gather errors
 			localmetrics.MetricMustGatherErrors.Inc()
+			msg := fmt.Sprintf("must-gather job %q failed", job1.Name)
+			if _, err := r.manageUploadCondition(context.TODO(), instance, ConditionUploadJobFailed, "JobFailed", msg); err != nil {
+				return reconcile.Result{}, err
+			}
 			err := r.DeleteResourceIfExists(context.TODO(), instance)
 			return reconcile.Result{}, err
 		}
@@ -341,15 +368,68 @@ func (r *MustGatherReconciler) addFinalizer(reqLogger logr.Logger, m *mustgather
 }
 
 func (r *MustGatherReconciler) getJobFromInstance(instance *mustgatherv1alpha1.MustGather) (*batchv1.Job, error) {
-	// Inject the operator image URI from the pod's env variables
-	operatorImage, varPresent := os.LookupEnv("OPERATOR_IMAGE")
-	if !varPresent {
-		err := goerror.New("operator image environment variable not found")
-		log.Error(err, "Error: no operator image found for job template")
-		return nil, err
+	operatorImage := ""
+	if uploadEnabled(*instance) {
+		operatorImage = strings.TrimSpace(os.Getenv(operatorImageEnv))
 	}
 
 	return getJobTemplate(operatorImage, *instance), nil
+}
+
+func uploadSecretName(instance *mustgatherv1alpha1.MustGather) string {
+	if !uploadEnabled(*instance) || instance.Spec.UploadTarget.SFTP == nil {
+		return ""
+	}
+	return instance.Spec.UploadTarget.SFTP.CaseManagementAccountSecretRef.Name
+}
+
+func validateReconcilePrerequisites(instance *mustgatherv1alpha1.MustGather) (conditionType, reason, message string, ok bool) {
+	if strings.TrimSpace(os.Getenv(defaultMustGatherImageEnv)) == "" {
+		return ConditionUploadOperatorConfigInvalid, "MissingGatherImage",
+			fmt.Sprintf("%s environment variable is not set or empty", defaultMustGatherImageEnv), false
+	}
+
+	if !uploadEnabled(*instance) {
+		return "", "", "", true
+	}
+
+	if strings.TrimSpace(os.Getenv(operatorImageEnv)) == "" {
+		return ConditionUploadOperatorConfigInvalid, "MissingOperatorImage",
+			fmt.Sprintf("%s environment variable is not set or empty", operatorImageEnv), false
+	}
+
+	if uploadSecretName(instance) == "" {
+		return ConditionUploadConfigurationInvalid, "MissingSecretRef",
+			"uploadTarget.sftp.caseManagementAccountSecretRef.name is required when upload is enabled", false
+	}
+
+	return "", "", "", true
+}
+
+func (r *MustGatherReconciler) manageUploadCondition(
+	ctx context.Context,
+	instance *mustgatherv1alpha1.MustGather,
+	conditionType string,
+	reason string,
+	message string,
+) (reconcile.Result, error) {
+	issue := fmt.Errorf("%s", message)
+	r.GetRecorder().Event(instance, "Warning", reason, message)
+
+	condition := metav1.Condition{
+		Type:               conditionType,
+		LastTransitionTime: metav1.Now(),
+		ObservedGeneration: instance.GetGeneration(),
+		Message:            message,
+		Reason:             reason,
+		Status:             metav1.ConditionTrue,
+	}
+	instance.SetConditions(apis.AddOrReplaceCondition(condition, instance.GetConditions()))
+	if err := r.GetClient().Status().Update(ctx, instance); err != nil {
+		log.Error(err, "unable to update status", "conditionType", conditionType)
+		return reconcile.Result{}, err
+	}
+	return reconcile.Result{}, issue
 }
 
 // contains is a helper function for finalizer

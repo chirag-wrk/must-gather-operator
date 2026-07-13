@@ -1,0 +1,47 @@
+{
+  "run_id": "51b36a11-46d4-42c8-98fb-2015a452f548",
+  "jira_key": "MG-53",
+  "change": "mg-53",
+  "phases": {
+    "1": {
+      "id": "e7bc2cde-5e0a-4c7c-90ce-4ece6eeb7b66",
+      "name": "spec_understanding",
+      "ended": true,
+      "tokens_in": 3597,
+      "tokens_out": 549
+    },
+    "2": {
+      "id": "2d3c0de3-30af-4628-a5d2-f839ebd441d0",
+      "name": "repo_assessment",
+      "ended": true
+    },
+    "3": {
+      "id": "101941c7-6f92-40ce-a6ed-bf863aa68f86",
+      "name": "arch_planning",
+      "ended": true
+    },
+    "4": {
+      "id": "515c0ed1-c122-407a-8f90-679363de5e06",
+      "name": "subtask_creation",
+      "ended": true
+    }
+  },
+  "tasks": {
+    "T1_1": "3f7e96e1-5e0d-46a5-bfb1-e30321649702",
+    "T2_1": "2b6d76b5-72df-4dcc-8457-954e4ea0d53c",
+    "T3_1": "03989c01-e4cd-4d5b-ab2a-57cfd7a08244",
+    "T2_2": "aefd5dd4-3758-49aa-94fa-c995c2029659",
+    "T4_1": "30fdd1e1-657a-424d-88f5-053397095b91",
+    "T4_2": "acbeb687-865f-4b5a-8b0b-48eeceee0d47",
+    "T5_1": "d3339287-042d-4e9a-a143-3cd26578c59d",
+    "T5_3": "1042eba3-8149-487c-a1b6-a2622eaf20bb",
+    "T5_2": "66ef0707-1a9f-48ec-b7ff-5578124577c7",
+    "T5_5": "097bdf32-c1f7-47e8-a5ab-354cab1b87b5",
+    "T7_1": "b1b3e47f-c529-4818-ba83-b9e3a02b10b5",
+    "T5_4": "9bbfcce6-de6d-4f23-a782-548b0dbba435",
+    "T5_6": "4c090e0d-df37-4212-9e8d-5490f34ad1ea",
+    "T6_1": "d7cc2ef3-7a4c-4554-8945-66ee4573fbad",
+    "T6_2": "0f3f6229-1693-47ac-b942-edac120931de",
+    "T7_2": "3f28e224-7e36-44d9-ae64-a1f9245a8c70"
+  }
+}

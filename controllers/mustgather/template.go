@@ -33,6 +33,7 @@ const (
 	uploadEnvPassword         = "password"
 	uploadEnvCaseId           = "caseid"
 	uploadEnvInternalUser     = "internal_user"
+	uploadEnvSFTPHost         = "SFTP_HOST"
 	uploadEnvHttpProxy        = "http_proxy"
 	uploadEnvHttpsProxy       = "https_proxy"
 	uploadEnvNoProxy          = "no_proxy"
@@ -46,6 +47,7 @@ const (
 
 	// Environment variable specifying the must-gather image
 	defaultMustGatherImageEnv = "DEFAULT_MUST_GATHER_IMAGE"
+	defaultSFTPHost           = "sftp.access.redhat.com"
 )
 
 func getJobTemplate(operatorImage string, mustGather v1alpha1.MustGather) *batchv1.Job {
@@ -80,17 +82,43 @@ func getJobTemplate(operatorImage string, mustGather v1alpha1.MustGather) *batch
 	job.Spec.Template.Spec.Containers = append(
 		job.Spec.Template.Spec.Containers,
 		getGatherContainer(mustGather.Spec.Audit, mustGather.Spec.MustGatherTimeout.Duration),
-		getUploadContainer(
-			operatorImage,
-			mustGather.Spec.CaseID,
-			mustGather.Spec.InternalUser,
-			httpProxy,
-			httpsProxy,
-			noProxy,
-			mustGather.Spec.CaseManagementAccountSecretRef,
-		),
 	)
+
+	if uploadEnabled(mustGather) {
+		sftpConfig := mustGather.Spec.UploadTarget.SFTP
+		job.Spec.Template.Spec.Containers = append(
+			job.Spec.Template.Spec.Containers,
+			getUploadContainer(
+				operatorImage,
+				sftpConfig.CaseID,
+				sftpConfig.InternalUser,
+				resolveSFTPHost(sftpConfig.Host),
+				httpProxy,
+				httpsProxy,
+				noProxy,
+				sftpConfig.CaseManagementAccountSecretRef,
+			),
+		)
+	}
 	return job
+}
+
+func uploadEnabled(mustGather v1alpha1.MustGather) bool {
+	if mustGather.Spec.UploadTarget == nil {
+		return false
+	}
+	if mustGather.Spec.UploadTarget.Type != v1alpha1.UploadTypeSFTP {
+		return false
+	}
+	return mustGather.Spec.UploadTarget.SFTP != nil
+}
+
+func resolveSFTPHost(host string) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return defaultSFTPHost
+	}
+	return host
 }
 
 func initializeJobTemplate(name string, namespace string, serviceAccountRef string) *batchv1.Job {
@@ -174,6 +202,7 @@ func getUploadContainer(
 	operatorImage string,
 	caseId string,
 	internalUser bool,
+	sftpHost string,
 	httpProxy string,
 	httpsProxy string,
 	noProxy string,
@@ -223,6 +252,10 @@ func getUploadContainer(
 			{
 				Name:  uploadEnvCaseId,
 				Value: caseId,
+			},
+			{
+				Name:  uploadEnvSFTPHost,
+				Value: sftpHost,
 			},
 			{
 				Name:  uploadEnvMustGatherOutput,

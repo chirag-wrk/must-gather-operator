@@ -1,0 +1,48 @@
+machine:
+  state: COMPLETE
+  current_task_id: null
+  current_task_index: 16
+  total_tasks: 16
+  last_transition: "2026-07-13T05:38:00Z"
+
+completed:
+  - task_id: T1_1
+    test_result: PASS
+  - task_id: T2_1
+    test_result: PASS
+  - task_id: T3_1
+    test_result: PASS
+  - task_id: T2_2
+    test_result: PASS
+  - task_id: T4_1
+    test_result: PASS
+  - task_id: T4_2
+    test_result: PASS
+  - task_id: T5_1
+    test_result: PASS
+  - task_id: T5_3
+    test_result: PASS
+  - task_id: T5_2
+    test_result: PASS
+  - task_id: T5_5
+    test_result: PASS
+  - task_id: T7_1
+    test_result: PASS
+  - task_id: T5_4
+    test_result: PASS
+  - task_id: T5_6
+    test_result: PASS
+  - task_id: T6_1
+    test_result: PASS
+  - task_id: T6_2
+    test_result: PASS
+  - task_id: T7_2
+    test_result: SKIPPED
+
+current_task_result: null
+
+rejections: []
+
+codegen_mode: direct
+working_folder: /home/cdate/must-gather-oper/must-gather-operator
+change: mg-53

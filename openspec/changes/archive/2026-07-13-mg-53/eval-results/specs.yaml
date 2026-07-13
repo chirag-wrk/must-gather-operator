@@ -1,0 +1,13 @@
+artifact_id: specs
+artifact_path: openspec/changes/mg-53/specs.md
+stage: specs
+stage_eval_file: null
+gate: skip
+scored_at: "2026-07-13T03:58:30Z"
+overall_score: null
+overall_pass: null
+refinement_applied: false
+cases: []
+notes: >-
+  Skip gate per artifact-eval-map.yaml — no stage eval file for specs.
+  Minimal evaluation report generated for user approval checkpoint.

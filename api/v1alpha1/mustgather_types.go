@@ -17,8 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -26,18 +26,15 @@ import (
 
 // MustGatherSpec defines the desired state of MustGather
 type MustGatherSpec struct {
-	// The is of the case this must gather will be uploaded to
-	// +kubebuilder:validation:Required
-	CaseID string `json:"caseID"`
-
-	// the secret container a username and password field to be used to authenticate with red hat case management systems
-	// +kubebuilder:validation:Required
-	CaseManagementAccountSecretRef corev1.LocalObjectReference `json:"caseManagementAccountSecretRef"`
-
 	// the service account to use to run the must gather job pod, defaults to default
 	// +kubebuilder:validation:Optional
 	/* +kubebuilder:default:="{Name:default}" */
 	ServiceAccountRef corev1.LocalObjectReference `json:"serviceAccountRef,omitempty"`
+
+	// uploadTarget sets the target config for uploading the collected must-gather tar.
+	// Uploading is disabled if this field is unset.
+	// +optional
+	UploadTarget *UploadTarget `json:"uploadTarget,omitempty"`
 
 	// A flag to specify if audit logs must be collected
 	// See documentation for further information.
@@ -54,10 +51,53 @@ type MustGatherSpec struct {
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:Format=duration
 	MustGatherTimeout metav1.Duration `json:"mustGatherTimeout,omitempty"`
+}
+
+// UploadType is a specific method for uploading to a target.
+// +kubebuilder:validation:Enum=SFTP
+type UploadType string
+
+const (
+	// UploadTypeSFTP uploads must-gather artifacts to an SFTP server.
+	UploadTypeSFTP UploadType = "SFTP"
+)
+
+// UploadTarget defines the configuration for uploading the must-gather tar.
+// +kubebuilder:validation:XValidation:rule="has(self.type) && self.type == 'SFTP' ? has(self.sftp) : !has(self.sftp)",message="sftp upload target config is required when upload type is SFTP, and forbidden otherwise"
+// +union
+type UploadTarget struct {
+	// type defines the method used for uploading to a specific target.
+	// +unionDiscriminator
+	// +required
+	Type UploadType `json:"type"`
+
+	// sftp defines the target details for uploading to a valid SFTP server.
+	// +unionMember
+	// +optional
+	SFTP *SFTPUploadTargetConfig `json:"sftp,omitempty"`
+}
+
+// SFTPUploadTargetConfig defines the configuration for SFTP uploads.
+type SFTPUploadTargetConfig struct {
+	// caseID specifies the Red Hat case number for support uploads.
+	// +kubebuilder:validation:MaxLength=128
+	// +kubebuilder:validation:MinLength=1
+	// +required
+	CaseID string `json:"caseID"`
+
+	// host specifies the SFTP server hostname.
+	// +kubebuilder:default:="sftp.access.redhat.com"
+	// +optional
+	Host string `json:"host,omitempty"`
+
+	// caseManagementAccountSecretRef references a secret containing the upload credentials.
+	// +required
+	CaseManagementAccountSecretRef corev1.LocalObjectReference `json:"caseManagementAccountSecretRef"`
 
 	// A flag to specify if the upload user provided in the caseManagementAccountSecret is a RH internal user.
 	// See documentation for further information.
 	// +kubebuilder:default:=true
+	// +optional
 	InternalUser bool `json:"internalUser,omitempty"`
 }
 

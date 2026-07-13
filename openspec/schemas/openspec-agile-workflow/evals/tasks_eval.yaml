@@ -1,0 +1,115 @@
+stage: tasks
+template: evals/refined-templates/tasks-template.md
+artifact: tasks.md
+version: 1
+eval_count: 4
+evals:
+  - id: eval-r001-tasks-001
+    round: 1
+    stage: tasks
+    source_issue_ids: [ISSUE-002]
+    patterns: [PAT-001, PAT-002]
+    input_refs:
+      - evals/evals/outputs/epic-bug-analysis/rca-summary.md
+      - evals/evals/outputs/epic-bug-analysis/pattern-analysis.md
+    prompt: |
+      When the feature introduces PVC storage with multi-run semantics, does the
+      execution backlog include at least one verification task for per-invocation
+      data isolation?
+
+      The backlog must:
+      1. Include a task (or sub-task) that explicitly verifies two successive runs on
+         the same PVC produce separate, non-overlapping output directories
+      2. The verification task must be in the dependency graph (not orphaned)
+      3. The task should reference acceptance criteria about data isolation
+      4. If the feature mentions "audit" or "compare" runs, isolation verification
+         is mandatory
+    assertions:
+      must_mention:
+        - "isolation"
+        - "verification"
+        - "PVC"
+        - "multiple runs"
+        - "separate"
+    scoring:
+      method: weighted_checklist
+      pass_threshold: 80
+
+  - id: eval-r001-tasks-002
+    round: 1
+    stage: tasks
+    source_issue_ids: [ISSUE-003]
+    patterns: [PAT-003]
+    input_refs:
+      - evals/evals/outputs/epic-bug-analysis/issue-taxonomy.json
+    prompt: |
+      When tasks involve user-facing path or string fields (e.g., subPath,
+      imageStreamRef), does each relevant task payload include edge-case handling
+      in its acceptance criteria?
+
+      The backlog must:
+      1. Include acceptance criteria for empty, whitespace-only, and separator-only
+         path inputs
+      2. Reference sanitization/trim logic as an implementation note
+      3. Include corresponding test tasks covering edge cases
+    assertions:
+      must_mention:
+        - "edge case"
+        - "empty"
+        - "whitespace"
+        - "sanitization"
+        - "test"
+    scoring:
+      method: weighted_checklist
+      pass_threshold: 80
+
+  - id: eval-r001-tasks-003
+    round: 1
+    stage: tasks
+    source_issue_ids: [ISSUE-004]
+    patterns: [PAT-005]
+    input_refs:
+      - evals/evals/outputs/epic-bug-analysis/issue-taxonomy.json
+    prompt: |
+      When tasks involve setting status conditions on CRs, does the task payload
+      specify distinct condition types for different failure categories?
+
+      The backlog must:
+      1. Include implementation notes about using specific condition types
+      2. Not instruct using a single generic condition type for all failures
+      3. Include a test task verifying condition type correctness
+    assertions:
+      must_mention:
+        - "condition type"
+        - "distinct"
+        - "failure"
+        - "status"
+    scoring:
+      method: weighted_checklist
+      pass_threshold: 80
+
+  - id: eval-r001-tasks-004
+    round: 1
+    stage: tasks
+    source_issue_ids: [ISSUE-005]
+    patterns: [PAT-006]
+    input_refs:
+      - evals/evals/outputs/epic-bug-analysis/issue-taxonomy.json
+    prompt: |
+      When the feature relies on environment variable defaults (e.g.,
+      DEFAULT_MUST_GATHER_IMAGE), does the backlog include a task for validating
+      the default is non-empty?
+
+      The backlog must:
+      1. Include a task or acceptance criterion for env var default validation
+      2. Specify that empty defaults must produce a clear error condition
+      3. Include a test task for the empty-default case
+    assertions:
+      must_mention:
+        - "environment variable"
+        - "default"
+        - "empty"
+        - "validation"
+    scoring:
+      method: weighted_checklist
+      pass_threshold: 80

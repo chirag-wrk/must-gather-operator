@@ -1,0 +1,65 @@
+jira_key: MG-53
+jira_summary: "As a user, I want to customize the SFTP hostname where must-gather bundles are uploaded"
+jira_url: https://issues.redhat.com/browse/MG-53
+target_repo: https://github.com/openshift/must-gather-operator
+use_working_folder_as_repo: true
+working_folder_path: /home/cdate/must-gather-oper/must-gather-operator
+created_at: "2026-07-13T03:52:45Z"
+jira_fetched_at: "2026-07-13T03:52:45Z"
+ep_source: ep.md
+ep_tracking: https://github.com/openshift/enhancements/pull/1831
+artifacts:
+  validation:
+    status: done
+    approved_at: "2026-07-13T03:55:46Z"
+    file: validation.json
+    eval_score: 84
+    quality_label: PASS
+  specs:
+    status: done
+    approved_at: "2026-07-13T03:56:58Z"
+    file: specs.md
+    gate: skip
+    quality_label: APPROVED
+  repo-assessment:
+    status: done
+    approved_at: "2026-07-13T03:59:48Z"
+    file: repo-assessment.md
+    eval_score: 100
+    quality_label: PASS
+  constitution:
+    status: resolved
+    resolved_at: "2026-07-13T04:05:00Z"
+    source: openspec/changes/mg-53/inputs/constitution.md
+    note: "INPUT — generated from repo evidence for MG-53 planning"
+  plan:
+    status: done
+    approved_at: "2026-07-13T04:02:13Z"
+    file: plan.md
+    eval_score: 100
+    quality_label: PASS
+  tasks:
+    status: done
+    approved_at: "2026-07-13T04:09:00Z"
+    file: tasks.md
+    eval_score: 100
+    quality_label: PASS
+  deviation-observed:
+    status: done
+    approved_at: "2026-07-13T04:13:00Z"
+    file: deviation-observed.md
+    gate: skip
+    quality_label: APPROVED
+  implementation:
+    status: done
+    approved_at: "2026-07-13T04:16:00Z"
+    file: implementation/design-bundle.md
+    eval_score: 100
+    quality_label: PASS
+  implementation-report:
+    status: done
+    approved_at: "2026-07-13T04:19:00Z"
+    file: implementation-report.md
+    gate: skip
+    quality_label: APPROVED
+    note: "Planning closure — 0/16 tasks executed; update after /opsx-apply completes"

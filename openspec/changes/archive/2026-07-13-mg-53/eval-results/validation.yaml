@@ -1,0 +1,21 @@
+artifact_id: validation
+artifact_path: openspec/changes/mg-53/validation.json
+stage: validation
+stage_eval_file: null
+gate: rubric_only
+rubric_source: templates/validation-template.md
+scored_at: "2026-07-13T03:58:00Z"
+overall_score: 84
+overall_pass: true
+refinement_applied: false
+rubric_scores:
+  completeness_score: 90
+  quality_score: 74
+  overall_status: PASS
+  pass_threshold: 80
+cases: []
+quality_issues_count: 4
+blockers_count: 0
+notes: >-
+  Rubric-only gate. Spec source: inputs/jira-spec.md (Jira MG-53 + EP operator-upload-targets).
+  No stage eval YAML cases. Overall PASS at 84% (threshold 80).

@@ -19,6 +19,36 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+func mustGatherUploadSpec(stagingHost bool) mustgatherv1alpha1.MustGatherSpec {
+	sftpConfig := &mustgatherv1alpha1.SFTPUploadTargetConfig{
+		CaseID: "0000000",
+		CaseManagementAccountSecretRef: corev1.LocalObjectReference{
+			Name: "case-management-creds",
+		},
+	}
+	if stagingHost {
+		sftpConfig.Host = "sftp.access.stage.redhat.com"
+	}
+
+	return mustgatherv1alpha1.MustGatherSpec{
+		UploadTarget: &mustgatherv1alpha1.UploadTarget{
+			Type: mustgatherv1alpha1.UploadTypeSFTP,
+			SFTP: sftpConfig,
+		},
+		ServiceAccountRef: corev1.LocalObjectReference{
+			Name: "must-gather-admin",
+		},
+	}
+}
+
+func mustGatherGatherOnlySpec() mustgatherv1alpha1.MustGatherSpec {
+	return mustgatherv1alpha1.MustGatherSpec{
+		ServiceAccountRef: corev1.LocalObjectReference{
+			Name: "must-gather-admin",
+		},
+	}
+}
+
 var _ = ginkgo.Describe("must-gather-operator", ginkgo.Ordered, func() {
 	var (
 		oc                *openshift.Client
@@ -74,7 +104,7 @@ var _ = ginkgo.Describe("must-gather-operator", ginkgo.Ordered, func() {
 		EventuallyDeployment(ctx, oc, operator, namespace).Should(BeAvailable())
 	})
 
-	ginkgo.DescribeTable("MustGather can be created", func(ctx context.Context, user, group string) {
+	ginkgo.DescribeTable("MustGather with SFTP uploadTarget can be created", func(ctx context.Context, user, group string) {
 		client, err := oc.Impersonate(user, group)
 		Expect(err).ShouldNot(HaveOccurred(), "unable to impersonate %s user in %s group", user, group)
 
@@ -83,21 +113,11 @@ var _ = ginkgo.Describe("must-gather-operator", ginkgo.Ordered, func() {
 				GenerateName: "osde2e-",
 				Namespace:    namespace,
 			},
-			Spec: mustgatherv1alpha1.MustGatherSpec{
-				CaseID: "0000000",
-				CaseManagementAccountSecretRef: corev1.LocalObjectReference{
-					Name: "case-management-creds",
-				},
-				ServiceAccountRef: corev1.LocalObjectReference{
-					Name: "must-gather-admin",
-				},
-			},
+			Spec: mustGatherUploadSpec(false),
 		}
 
 		err = client.Create(ctx, mustgather)
 		Expect(err).ShouldNot(HaveOccurred(), "failed to create mustgather as %s", group)
-
-		// TODO: do something with them?
 
 		err = client.Delete(ctx, mustgather)
 		Expect(err).ShouldNot(HaveOccurred(), "failed to delete mustgather as %s", group)
@@ -105,6 +125,48 @@ var _ = ginkgo.Describe("must-gather-operator", ginkgo.Ordered, func() {
 		ginkgo.Entry("by backplane-cluster-admin", "backplane-cluster-admin", ""),
 		ginkgo.Entry("by openshift-backplane-cee", "test@redhat.com", "system:serviceaccounts:openshift-backplane-cee"),
 	)
+
+	ginkgo.DescribeTable("MustGather gather-only can be created", func(ctx context.Context, user, group string) {
+		client, err := oc.Impersonate(user, group)
+		Expect(err).ShouldNot(HaveOccurred(), "unable to impersonate %s user in %s group", user, group)
+
+		mustgather := &mustgatherv1alpha1.MustGather{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "osde2e-gather-",
+				Namespace:    namespace,
+			},
+			Spec: mustGatherGatherOnlySpec(),
+		}
+
+		err = client.Create(ctx, mustgather)
+		Expect(err).ShouldNot(HaveOccurred(), "failed to create gather-only mustgather as %s", group)
+
+		err = client.Delete(ctx, mustgather)
+		Expect(err).ShouldNot(HaveOccurred(), "failed to delete gather-only mustgather as %s", group)
+	},
+		ginkgo.Entry("by backplane-cluster-admin", "backplane-cluster-admin", ""),
+	)
+
+	ginkgo.Describe("[Skipped:Disconnected] MustGather SFTP upload", func() {
+		ginkgo.It("can be created with staging SFTP host", func(ctx context.Context) {
+			client, err := oc.Impersonate("backplane-cluster-admin", "")
+			Expect(err).ShouldNot(HaveOccurred(), "unable to impersonate backplane-cluster-admin")
+
+			mustgather := &mustgatherv1alpha1.MustGather{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "osde2e-staging-",
+					Namespace:    namespace,
+				},
+				Spec: mustGatherUploadSpec(true),
+			}
+
+			err = client.Create(ctx, mustgather)
+			Expect(err).ShouldNot(HaveOccurred(), "failed to create staging SFTP mustgather")
+
+			err = client.Delete(ctx, mustgather)
+			Expect(err).ShouldNot(HaveOccurred(), "failed to delete staging SFTP mustgather")
+		})
+	})
 
 	ginkgo.PIt("can be upgraded", func(ctx context.Context) {
 		ginkgo.By("forcing operator upgrade")

@@ -1,0 +1,24 @@
+artifact_id: repo-assessment
+artifact_path: openspec/changes/mg-53/repo-assessment.md
+stage: repo-assessment
+stage_eval_file: evals/repo-assessment_eval.yaml
+scored_at: "2026-07-13T04:02:00Z"
+overall_score: 100
+overall_pass: true
+refinement_applied: false
+cases:
+  - id: eval-r001-ra-001
+    score: 100
+    pass: true
+    failures: []
+  - id: eval-r001-ra-002
+    score: 100
+    pass: true
+    failures: []
+  - id: eval-r001-ra-003
+    score: 100
+    pass: true
+    failures: []
+notes: >-
+  All 3 stage eval cases pass. Feature is greenfield on master at e766ff0.
+  Working-folder assessment against local checkout.

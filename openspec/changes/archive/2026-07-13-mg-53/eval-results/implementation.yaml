@@ -1,0 +1,30 @@
+artifact_id: implementation
+artifact_path: openspec/changes/mg-53/implementation/design-bundle.md
+stage: implementation
+stage_eval_file: evals/implementation_eval.yaml
+scored_at: "2026-07-13T04:15:00Z"
+overall_score: 100
+overall_pass: true
+refinement_applied: false
+scope_note: "Pre-implementation design bundle scoped to T1_1; cross-cutting tables document full MG-53 plan"
+cases:
+  - id: eval-r001-impl-001
+    score: 100
+    pass: true
+    failures: []
+    note: "Edge-Case & Input Validation Coverage table present for host field; empty/whitespace/trim/test referenced"
+  - id: eval-r001-impl-002
+    score: 100
+    pass: true
+    failures: []
+    note: "Status Condition Types Used table with 4 distinct types, Distinct from generic? Yes"
+  - id: eval-r001-impl-003
+    score: 100
+    pass: true
+    failures: []
+    note: "gather and upload both containers mount consistency documented; volume mount plan for T4_1/T5_3"
+  - id: eval-r001-impl-004
+    score: 100
+    pass: true
+    failures: []
+    note: "Environment variable default validation table with empty guard and test task references"

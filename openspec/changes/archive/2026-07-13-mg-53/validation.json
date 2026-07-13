@@ -1,0 +1,45 @@
+{
+  "metadata": {
+    "ticket_id": "MG-53",
+    "doc_type": "enhancement",
+    "pass_threshold": 80,
+    "output_mode": "json_plus_summary",
+    "weights_applied": { "completeness": 0.6, "quality": 0.4 }
+  },
+  "validation_results": {
+    "completeness_score": 90,
+    "quality_score": 74,
+    "overall_score": 84,
+    "overall_status": "PASS",
+    "missing_elements": [],
+    "quality_issues": [
+      {
+        "type": "Consistency",
+        "quote": "The top-level fields caseID, caseManagementAccountSecretRef, and ftpHost have been removed... Mitigation: The backward compatibility logic will prevent disruption",
+        "suggestion": "Clarify whether deprecated top-level fields are removed at CRD level or supported via conversion/defaulting. If removed, delete backward-compat E2E test and migration mitigation claims; if supported, document the conversion mechanism and deprecation timeline."
+      },
+      {
+        "type": "Consistency",
+        "quote": "apiVersion: managed.openshift.io/v1alpha1",
+        "suggestion": "Update all YAML examples to use operator.openshift.io/v1alpha1 to match the must-gather-operator CRD group (api/v1alpha1/groupversion_info.go)."
+      },
+      {
+        "type": "Testability",
+        "quote": "Acceptance criteria: Able to upload must-gather bundle to staging servers.",
+        "suggestion": "Restate Jira acceptance criteria as Given/When/Then scenarios, e.g., 'Given uploadTarget.type=SFTP and host=sftp.access.stage.redhat.com, When the must-gather job completes, Then the bundle is uploaded to the staging SFTP server.'"
+      },
+      {
+        "type": "Ambiguity",
+        "quote": "The upgrade process for the operator should be blocked until all resources are compliant, or the operator should handle existing resources gracefully",
+        "suggestion": "Choose one upgrade policy: block upgrade until migration, or runtime graceful degradation with error conditions. Document the selected approach and operator behavior for non-compliant CRs."
+      }
+    ],
+    "blockers": [],
+    "non_blockers": [
+      "Resolve backward-compatibility vs breaking-change contradiction before implementation",
+      "Fix apiVersion in EP examples (managed.openshift.io → operator.openshift.io)",
+      "Formalize thin Jira acceptance criteria using Given/When/Then",
+      "Clarify upgrade blocking vs graceful error handling policy"
+    ]
+  }
+}

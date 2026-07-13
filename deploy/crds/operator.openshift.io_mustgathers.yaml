@@ -45,31 +45,6 @@ spec:
                   A flag to specify if audit logs must be collected
                   See documentation for further information.
                 type: boolean
-              caseID:
-                description: The is of the case this must gather will be uploaded
-                  to
-                type: string
-              caseManagementAccountSecretRef:
-                description: the secret container a username and password field to
-                  be used to authenticate with red hat case management systems
-                properties:
-                  name:
-                    default: ""
-                    description: |-
-                      Name of the referent.
-                      This field is effectively required, but due to backwards compatibility is
-                      allowed to be empty. Instances of this type with an empty value here are
-                      almost certainly wrong.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                    type: string
-                type: object
-                x-kubernetes-map-type: atomic
-              internalUser:
-                default: true
-                description: |-
-                  A flag to specify if the upload user provided in the caseManagementAccountSecret is a RH internal user.
-                  See documentation for further information.
-                type: boolean
               mustGatherTimeout:
                 description: |-
                   A time limit for gather command to complete a floating point number with a suffix:
@@ -112,9 +87,64 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
-            required:
-            - caseID
-            - caseManagementAccountSecretRef
+              uploadTarget:
+                description: |-
+                  uploadTarget sets the target config for uploading the collected must-gather tar.
+                  Uploading is disabled if this field is unset.
+                properties:
+                  sftp:
+                    description: sftp defines the target details for uploading to
+                      a valid SFTP server.
+                    properties:
+                      caseID:
+                        description: caseID specifies the Red Hat case number for
+                          support uploads.
+                        maxLength: 128
+                        minLength: 1
+                        type: string
+                      caseManagementAccountSecretRef:
+                        description: caseManagementAccountSecretRef references a secret
+                          containing the upload credentials.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                      host:
+                        default: sftp.access.redhat.com
+                        description: host specifies the SFTP server hostname.
+                        type: string
+                      internalUser:
+                        default: true
+                        description: |-
+                          A flag to specify if the upload user provided in the caseManagementAccountSecret is a RH internal user.
+                          See documentation for further information.
+                        type: boolean
+                    required:
+                    - caseID
+                    - caseManagementAccountSecretRef
+                    type: object
+                  type:
+                    description: type defines the method used for uploading to a specific
+                      target.
+                    enum:
+                    - SFTP
+                    type: string
+                required:
+                - type
+                type: object
+                x-kubernetes-validations:
+                - message: sftp upload target config is required when upload type
+                    is SFTP, and forbidden otherwise
+                  rule: 'has(self.type) && self.type == ''SFTP'' ? has(self.sftp)
+                    : !has(self.sftp)'
             type: object
           status:
             description: MustGatherStatus defines the observed state of MustGather

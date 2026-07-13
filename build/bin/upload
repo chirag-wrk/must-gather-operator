@@ -7,6 +7,7 @@
 # caseid: the case id to upload to
 # must_gather_output: the directory in which the must gather agents have collected the information
 # must_gather_upload: a workspace directory that can be used as stage to zip and upload the must gather compressed file
+# SFTP_HOST: optional SFTP server hostname (defaults to sftp.access.redhat.com)
 
 set -o errexit
 
@@ -16,7 +17,7 @@ FILENAME_PREFIX=${FILENAME_PREFIX:="must-gather"}
 CURRENT_TIMESTAMP=$(date --utc +%Y%m%d_%H%M%SZ)
 CSP_FILENAME=${FILENAME_PREFIX}-${CURRENT_TIMESTAMP}.tar.gz
 CSP_FILE="${must_gather_upload}/${CSP_FILENAME}"
-FTP_HOST=sftp.access.redhat.com
+SFTP_HOST=${SFTP_HOST:-"sftp.access.redhat.com"}
 KNOWN_HOSTS_PATH="/tmp/must-gather-operator/.ssh/known_hosts"
 SFTP_OPTIONS="-o BatchMode=no -o StrictHostKeyChecking=no -o UserKnownHostsFile=${KNOWN_HOSTS_PATH} "
 
@@ -82,12 +83,12 @@ fi
 echo "Uploading ${CSP_FILE}..."
 export SSHPASS=${password}
 if [ -n "${PROXY_COMMAND}" ]; then
-  sshpass -e sftp ${SFTP_OPTIONS} "${PROXY_COMMAND}" ${username}@${FTP_HOST} << EOF
+  sshpass -e sftp ${SFTP_OPTIONS} "${PROXY_COMMAND}" ${username}@${SFTP_HOST} << EOF
     put ${CSP_FILE} ${REMOTE_FILENAME}
     bye
 EOF
 else
-  sshpass -e sftp ${SFTP_OPTIONS} -b - ${username}@${FTP_HOST} << EOF
+  sshpass -e sftp ${SFTP_OPTIONS} -b - ${username}@${SFTP_HOST} << EOF
     put ${CSP_FILE} ${REMOTE_FILENAME}
     bye
 EOF
