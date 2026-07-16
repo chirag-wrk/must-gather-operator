@@ -14,6 +14,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 )
 
 const (
@@ -32,9 +33,13 @@ func Test_initializeJobTemplate(t *testing.T) {
 	pvcSubPath := "test-path"
 
 	tests := []struct {
-		name        string
-		storage     *mustgatherv1alpha1.Storage
-		caConfigMap string
+		name               string
+		storage            *mustgatherv1alpha1.Storage
+		caConfigMap        string
+		obfuscate          *mustgatherv1alpha1.ObfuscateConfig
+		wantSourcePVC      bool
+		wantSourceReadOnly bool
+		wantSourceClaim    string
 	}{
 		{
 			name: "Without PVC",
@@ -55,11 +60,29 @@ func Test_initializeJobTemplate(t *testing.T) {
 			name:        "With CA config map",
 			caConfigMap: "trusted-ca-cert-001",
 		},
+		{
+			name: "With obfuscate config map",
+			obfuscate: &mustgatherv1alpha1.ObfuscateConfig{
+				ObfuscationConfigRef: &v1.LocalObjectReference{Name: "custom-obfuscate-config"},
+			},
+		},
+		{
+			name: "With obfuscate source PVC",
+			obfuscate: &mustgatherv1alpha1.ObfuscateConfig{
+				Enabled: ptr.To(true),
+				Source: &mustgatherv1alpha1.ObfuscateSourceConfig{
+					Claim: mustgatherv1alpha1.PersistentVolumeClaimReference{Name: "source-pvc"},
+				},
+			},
+			wantSourcePVC:      true,
+			wantSourceReadOnly: true,
+			wantSourceClaim:    "source-pvc",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			job := initializeJobTemplate(testName, testNamespace, testServiceAccountRef, tt.storage, tt.caConfigMap)
+			job := initializeJobTemplate(testName, testNamespace, testServiceAccountRef, tt.storage, tt.caConfigMap, tt.obfuscate)
 
 			if got := job.Name; got != testName {
 				t.Fatalf("job name from initializeJobTemplate() was not correctly set. got %v, wanted %v", got, testName)
@@ -73,17 +96,26 @@ func Test_initializeJobTemplate(t *testing.T) {
 				t.Fatalf("job service account name from initializeJobTemplate() was not correctly set. got %v, wanted %v", got, testServiceAccountRef)
 			}
 
-			if (tt.storage != nil || tt.caConfigMap != "") && len(job.Spec.Template.Spec.Volumes) == 0 {
+			if (tt.storage != nil || tt.caConfigMap != "" || tt.obfuscate != nil) && len(job.Spec.Template.Spec.Volumes) == 0 {
 				t.Fatalf("expected at least one volume to be present")
 			}
 
 			foundStorageVolume := false
 			foundCAVolume := false
+			foundObfuscateConfigVolume := false
+			obfuscateConfigMap := obfuscateConfigMapName(tt.obfuscate)
 			for _, v := range job.Spec.Template.Spec.Volumes {
 				if v.Name == knownStorageVolumeMountNameForTest {
 					foundStorageVolume = true
 
-					if tt.storage != nil && v.PersistentVolumeClaim.ClaimName != tt.storage.PersistentVolume.Claim.Name {
+					if tt.wantSourcePVC {
+						if v.PersistentVolumeClaim.ClaimName != tt.wantSourceClaim {
+							t.Fatalf("expected source pvc claim %q, got %q", tt.wantSourceClaim, v.PersistentVolumeClaim.ClaimName)
+						}
+						if v.PersistentVolumeClaim.ReadOnly != tt.wantSourceReadOnly {
+							t.Fatalf("expected source pvc readOnly=%v, got %v", tt.wantSourceReadOnly, v.PersistentVolumeClaim.ReadOnly)
+						}
+					} else if tt.storage != nil && v.PersistentVolumeClaim.ClaimName != tt.storage.PersistentVolume.Claim.Name {
 						t.Fatalf("pvc claim name from initializeJobTemplate() was not correctly set. got %v, wanted %v", v.PersistentVolumeClaim.ClaimName, tt.storage.PersistentVolume.Claim.Name)
 					}
 				}
@@ -95,14 +127,22 @@ func Test_initializeJobTemplate(t *testing.T) {
 						t.Fatalf("config map CA from initializeJobTemplate() was not correctly set. got %v, wanted %v", v.ConfigMap.Name, tt.caConfigMap)
 					}
 				}
+
+				if v.Name == obfuscateConfigVolumeName && v.ConfigMap != nil && v.ConfigMap.Name == obfuscateConfigMap {
+					foundObfuscateConfigVolume = true
+				}
 			}
 
-			if tt.storage != nil && !foundStorageVolume {
+			if (tt.storage != nil || tt.wantSourcePVC) && !foundStorageVolume {
 				t.Fatalf("expected volumeMount for storage was not found got %v", job.Spec.Template.Spec.Volumes)
 			}
 
 			if tt.caConfigMap != "" && !foundCAVolume {
 				t.Fatalf("expected volumeMount for CA was not found got %v", job.Spec.Template.Spec.Volumes)
+			}
+
+			if obfuscateConfigMap != "" && !foundObfuscateConfigVolume {
+				t.Fatalf("expected obfuscate config volume was not found got %v", job.Spec.Template.Spec.Volumes)
 			}
 		})
 	}
@@ -121,6 +161,8 @@ func Test_getGatherContainer(t *testing.T) {
 		args            []string
 		caConfigMap     string
 		timeFilter      *GatherTimeFilter
+		obfuscate       *mustgatherv1alpha1.ObfuscateConfig
+		wantChown       bool
 	}{
 		{
 			name:            "no audit",
@@ -213,10 +255,41 @@ func Test_getGatherContainer(t *testing.T) {
 				SinceTime: &testSinceTime,
 			},
 		},
+		{
+			name:            "obfuscate enabled appends chown",
+			timeout:         5 * time.Second,
+			mustGatherImage: "quay.io/foo/bar/must-gather:latest",
+			obfuscate:       &mustgatherv1alpha1.ObfuscateConfig{Enabled: ptr.To(true)},
+			wantChown:       true,
+		},
+		{
+			name:            "obfuscate disabled omits chown",
+			timeout:         5 * time.Second,
+			mustGatherImage: "quay.io/foo/bar/must-gather:latest",
+			obfuscate:       &mustgatherv1alpha1.ObfuscateConfig{Enabled: ptr.To(false)},
+		},
+		{
+			name:            "obfuscate enabled with source omits chown",
+			timeout:         5 * time.Second,
+			mustGatherImage: "quay.io/foo/bar/must-gather:latest",
+			obfuscate: &mustgatherv1alpha1.ObfuscateConfig{
+				Enabled: ptr.To(true),
+				Source: &mustgatherv1alpha1.ObfuscateSourceConfig{
+					Claim: mustgatherv1alpha1.PersistentVolumeClaimReference{Name: "bundle-pvc"},
+				},
+			},
+		},
+		{
+			name:            "custom command omits chown even when obfuscate enabled",
+			timeout:         5 * time.Second,
+			mustGatherImage: "quay.io/foo/bar/must-gather:latest",
+			command:         []string{"/usr/bin/custom-gather"},
+			obfuscate:       &mustgatherv1alpha1.ObfuscateConfig{Enabled: ptr.To(true)},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			container := getGatherContainer(tt.mustGatherImage, tt.audit, tt.timeout, tt.storage, tt.caConfigMap, tt.timeFilter, tt.command, tt.args)
+			container := getGatherContainer(tt.mustGatherImage, tt.audit, tt.timeout, tt.storage, tt.caConfigMap, tt.timeFilter, tt.command, tt.args, tt.obfuscate)
 
 			if len(tt.command) == 0 {
 				containerCommand := container.Command[2]
@@ -228,6 +301,13 @@ func Test_getGatherContainer(t *testing.T) {
 				timeoutInSeconds := int(math.Ceil(tt.timeout.Seconds()))
 				if !strings.HasPrefix(containerCommand, fmt.Sprintf("timeout %d", timeoutInSeconds)) {
 					t.Fatalf("the duration was not properly added to the container command, got %v but wanted %v", strings.Split(containerCommand, " ")[1], timeoutInSeconds)
+				}
+				hasChown := strings.Contains(containerCommand, obfuscateChownSuffix)
+				if tt.wantChown && !hasChown {
+					t.Fatalf("expected gather command to include chown suffix %q", obfuscateChownSuffix)
+				}
+				if !tt.wantChown && hasChown {
+					t.Fatalf("expected gather command without chown suffix")
 				}
 			} else {
 				if !reflect.DeepEqual(container.Command, tt.command) {
@@ -331,6 +411,7 @@ func Test_getUploadContainer(t *testing.T) {
 		noProxy          string
 		mountCAConfigMap bool
 		secretKeyRefName v1.LocalObjectReference
+		obfuscate        *mustgatherv1alpha1.ObfuscateConfig
 	}{
 		{
 			name:             "All fields present",
@@ -447,11 +528,50 @@ func Test_getUploadContainer(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:          "Obfuscate-only without SFTP credentials",
+			operatorImage: "testImage",
+		},
+		{
+			name:          "Obfuscate enabled sets obfuscate env",
+			operatorImage: "testImage",
+			obfuscate:     &mustgatherv1alpha1.ObfuscateConfig{Enabled: ptr.To(true)},
+		},
+		{
+			name:          "Obfuscate config ref mounts ConfigMap and sets obfuscate_config env",
+			operatorImage: "testImage",
+			obfuscate: &mustgatherv1alpha1.ObfuscateConfig{
+				Enabled: ptr.To(true),
+				ObfuscationConfigRef: &v1.LocalObjectReference{
+					Name: "custom-obfuscate-config",
+				},
+			},
+		},
+		{
+			name:          "Obfuscate source uses direct upload and read-only PVC mount",
+			operatorImage: "testImage",
+			obfuscate: &mustgatherv1alpha1.ObfuscateConfig{
+				Enabled: ptr.To(true),
+				Source: &mustgatherv1alpha1.ObfuscateSourceConfig{
+					Claim:   mustgatherv1alpha1.PersistentVolumeClaimReference{Name: "source-pvc"},
+					SubPath: "must-gather-2026-06-25",
+				},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			testFailed := false
-			container := getUploadContainer(tt.operatorImage, tt.caseId, tt.host, tt.internalUser, tt.storage, tt.httpProxy, tt.httpsProxy, tt.noProxy, tt.secretKeyRefName, tt.mountCAConfigMap)
+			var sftp *uploadSFTPParams
+			if tt.caseId != "" && tt.secretKeyRefName.Name != "" {
+				sftp = &uploadSFTPParams{
+					caseID:       tt.caseId,
+					host:         tt.host,
+					internalUser: tt.internalUser,
+					secretRef:    tt.secretKeyRefName,
+				}
+			}
+			container := getUploadContainer(tt.operatorImage, tt.storage, tt.httpProxy, tt.httpsProxy, tt.noProxy, tt.mountCAConfigMap, sftp, tt.obfuscate)
 
 			if container.Image != tt.operatorImage {
 				t.Fatalf("expected container image %v but got %v", tt.operatorImage, container.Image)
@@ -512,14 +632,23 @@ func Test_getUploadContainer(t *testing.T) {
 			for _, env := range container.Env {
 				switch env.Name {
 				case uploadEnvCaseId:
+					if sftp == nil {
+						t.Fatalf("did not expect %s env var without SFTP params", uploadEnvCaseId)
+					}
 					if env.Value != tt.caseId {
 						t.Fatalf("expected case ID envar %v but got %v", tt.caseId, env.Value)
 					}
 				case uploadEnvHost:
+					if sftp == nil {
+						t.Fatalf("did not expect %s env var without SFTP params", uploadEnvHost)
+					}
 					if env.Value != tt.host {
 						t.Fatalf("expected host envar %v but got %v", tt.host, env.Value)
 					}
 				case uploadEnvInternalUser:
+					if sftp == nil {
+						t.Fatalf("did not expect %s env var without SFTP params", uploadEnvInternalUser)
+					}
 					if env.Value != strconv.FormatBool(tt.internalUser) {
 						t.Fatalf("expected internal user envar %v but got %v", tt.internalUser, env.Value)
 					}
@@ -536,6 +665,9 @@ func Test_getUploadContainer(t *testing.T) {
 						t.Fatalf("expected noproxy envar %v but got %v", tt.noProxy, env.Value)
 					}
 				case uploadEnvUsername, uploadEnvPassword:
+					if sftp == nil {
+						t.Fatalf("did not expect %s env var without SFTP params", env.Name)
+					}
 					if !reflect.DeepEqual(env.ValueFrom.SecretKeyRef.LocalObjectReference, tt.secretKeyRefName) {
 						t.Fatalf("expected %v envar to have secret key ref name %v but got %v", env.Name, tt.secretKeyRefName.Name, env.ValueFrom.SecretKeyRef.Name)
 					}
@@ -543,6 +675,637 @@ func Test_getUploadContainer(t *testing.T) {
 
 				if testFailed {
 					t.Error()
+				}
+			}
+
+			if sftp == nil {
+				for _, name := range []string{uploadEnvCaseId, uploadEnvHost, uploadEnvInternalUser, uploadEnvUsername, uploadEnvPassword} {
+					if _, ok := envValues(container)[name]; ok {
+						t.Fatalf("did not expect %s env var for obfuscate-only upload container", name)
+					}
+				}
+				if envValues(container)[uploadEnvMustGatherOutput] != volumeMountPath {
+					t.Fatalf("expected %s=%s", uploadEnvMustGatherOutput, volumeMountPath)
+				}
+				if envValues(container)[uploadEnvMustGatherUpload] != volumeUploadMountPath {
+					t.Fatalf("expected %s=%s", uploadEnvMustGatherUpload, volumeUploadMountPath)
+				}
+			}
+
+			if tt.obfuscate != nil && tt.obfuscate.Enabled != nil && *tt.obfuscate.Enabled {
+				if envValues(container)[obfuscateEnvEnabled] != "true" {
+					t.Fatalf("expected %s=true when obfuscation enabled", obfuscateEnvEnabled)
+				}
+			} else if _, ok := envValues(container)[obfuscateEnvEnabled]; ok {
+				t.Fatalf("did not expect %s env var when obfuscation disabled", obfuscateEnvEnabled)
+			}
+
+			if tt.obfuscate != nil && tt.obfuscate.ObfuscationConfigRef != nil && tt.obfuscate.ObfuscationConfigRef.Name != "" {
+				if envValues(container)[obfuscateEnvConfig] != obfuscateConfigMountPath {
+					t.Fatalf("expected %s=%s", obfuscateEnvConfig, obfuscateConfigMountPath)
+				}
+				var configMount *v1.VolumeMount
+				for i := range container.VolumeMounts {
+					if container.VolumeMounts[i].Name == obfuscateConfigVolumeName {
+						configMount = &container.VolumeMounts[i]
+						break
+					}
+				}
+				if configMount == nil {
+					t.Fatalf("expected obfuscate config volume mount %q", obfuscateConfigVolumeName)
+				}
+				if configMount.MountPath != obfuscateConfigMountPath {
+					t.Fatalf("expected mount path %q, got %q", obfuscateConfigMountPath, configMount.MountPath)
+				}
+				if configMount.SubPath != obfuscateConfigMapKey {
+					t.Fatalf("expected subPath %q, got %q", obfuscateConfigMapKey, configMount.SubPath)
+				}
+				if !configMount.ReadOnly {
+					t.Fatalf("expected obfuscate config mount to be read-only")
+				}
+			}
+
+			if tt.obfuscate != nil && tt.obfuscate.Source != nil && tt.obfuscate.Source.Claim.Name != "" {
+				uploadCmd := container.Command[2]
+				if strings.Contains(uploadCmd, "pgrep") {
+					t.Fatalf("did not expect pgrep in upload command for source PVC mode")
+				}
+				if !strings.Contains(uploadCmd, uploadCommandDirect) {
+					t.Fatalf("expected direct upload command for source PVC mode")
+				}
+				var outputMount *v1.VolumeMount
+				for i := range container.VolumeMounts {
+					if container.VolumeMounts[i].Name == outputVolumeName {
+						outputMount = &container.VolumeMounts[i]
+						break
+					}
+				}
+				if outputMount == nil {
+					t.Fatalf("expected output volume mount %q", outputVolumeName)
+				}
+				if !outputMount.ReadOnly {
+					t.Fatalf("expected source PVC mount to be read-only")
+				}
+				if outputMount.SubPath != strings.Trim(tt.obfuscate.Source.SubPath, "/") {
+					t.Fatalf("expected subPath %q, got %q", tt.obfuscate.Source.SubPath, outputMount.SubPath)
+				}
+				if outputMount.SubPathExpr != "" {
+					t.Fatalf("did not expect subPathExpr for source PVC mode")
+				}
+			}
+		})
+	}
+}
+
+func Test_getJobTemplate_UploadContainerGating(t *testing.T) {
+	t.Setenv(DefaultMustGatherImageEnv, "quay.io/foo/bar/must-gather:latest")
+
+	enabled := true
+	disabled := false
+
+	tests := []struct {
+		name       string
+		spec       mustgatherv1alpha1.MustGatherSpec
+		wantUpload bool
+		wantSFTP   bool
+	}{
+		{
+			name: "obfuscate enabled with source only includes upload without SFTP env",
+			spec: mustgatherv1alpha1.MustGatherSpec{
+				ServiceAccountName: "default",
+				Obfuscate: &mustgatherv1alpha1.ObfuscateConfig{
+					Enabled: &enabled,
+					Source: &mustgatherv1alpha1.ObfuscateSourceConfig{
+						Claim: mustgatherv1alpha1.PersistentVolumeClaimReference{Name: "source-pvc"},
+					},
+				},
+			},
+			wantUpload: true,
+			wantSFTP:   false,
+		},
+		{
+			name: "obfuscate enabled with uploadTarget includes upload with SFTP env",
+			spec: mustgatherv1alpha1.MustGatherSpec{
+				ServiceAccountName: "default",
+				Obfuscate: &mustgatherv1alpha1.ObfuscateConfig{
+					Enabled: &enabled,
+				},
+				UploadTarget: &mustgatherv1alpha1.UploadTargetSpec{
+					Type: mustgatherv1alpha1.UploadTypeSFTP,
+					SFTP: &mustgatherv1alpha1.SFTPSpec{
+						CaseID: "5678",
+						Host:   "sftp.example.com",
+						CaseManagementAccountSecretRef: v1.LocalObjectReference{
+							Name: "case-secret",
+						},
+					},
+				},
+			},
+			wantUpload: true,
+			wantSFTP:   true,
+		},
+		{
+			name: "obfuscate nil and no uploadTarget omits upload container",
+			spec: mustgatherv1alpha1.MustGatherSpec{
+				ServiceAccountName: "default",
+			},
+			wantUpload: false,
+		},
+		{
+			name: "obfuscate disabled and no uploadTarget omits upload container",
+			spec: mustgatherv1alpha1.MustGatherSpec{
+				ServiceAccountName: "default",
+				Obfuscate: &mustgatherv1alpha1.ObfuscateConfig{
+					Enabled: &disabled,
+				},
+			},
+			wantUpload: false,
+		},
+		{
+			name: "uploadTarget only preserves backward-compatible SFTP upload",
+			spec: mustgatherv1alpha1.MustGatherSpec{
+				ServiceAccountName: "default",
+				UploadTarget: &mustgatherv1alpha1.UploadTargetSpec{
+					Type: mustgatherv1alpha1.UploadTypeSFTP,
+					SFTP: &mustgatherv1alpha1.SFTPSpec{
+						CaseID: "9012",
+						CaseManagementAccountSecretRef: v1.LocalObjectReference{
+							Name: "legacy-secret",
+						},
+					},
+				},
+			},
+			wantUpload: true,
+			wantSFTP:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mg := mustgatherv1alpha1.MustGather{
+				ObjectMeta: metav1.ObjectMeta{Name: "mg", Namespace: "ns"},
+				Spec:       tt.spec,
+			}
+
+			job := getJobTemplate("image", "operator-image", mg, "")
+			upload, ok := uploadContainerInJob(job)
+			if ok != tt.wantUpload {
+				t.Fatalf("expected upload container present=%v, got %v", tt.wantUpload, ok)
+			}
+			if !tt.wantUpload {
+				return
+			}
+
+			uploadEnv := envValues(upload)
+			if tt.wantSFTP {
+				if uploadEnv[uploadEnvCaseId] == "" {
+					t.Fatalf("expected non-empty %s env var", uploadEnvCaseId)
+				}
+				if !hasSecretEnv(upload, uploadEnvUsername) || !hasSecretEnv(upload, uploadEnvPassword) {
+					t.Fatalf("expected username/password secret env vars when SFTP upload is configured")
+				}
+			} else {
+				sftpLiteralEnv := []string{uploadEnvCaseId, uploadEnvHost, uploadEnvInternalUser}
+				for _, name := range sftpLiteralEnv {
+					if _, has := uploadEnv[name]; has {
+						t.Fatalf("did not expect %s env var without SFTP upload target", name)
+					}
+				}
+				if hasSecretEnv(upload, uploadEnvUsername) || hasSecretEnv(upload, uploadEnvPassword) {
+					t.Fatalf("did not expect username/password secret env vars without SFTP upload target")
+				}
+			}
+		})
+	}
+}
+
+func Test_getJobTemplate_SourcePVCMode(t *testing.T) {
+	t.Setenv(DefaultMustGatherImageEnv, "quay.io/foo/bar/must-gather:latest")
+
+	enabled := true
+	tests := []struct {
+		name          string
+		spec          mustgatherv1alpha1.MustGatherSpec
+		wantUpload    bool
+		wantSourcePVC string
+		wantSubPath   string
+	}{
+		{
+			name: "obfuscate-only source mode omits gather and uses source PVC",
+			spec: mustgatherv1alpha1.MustGatherSpec{
+				ServiceAccountName: "default",
+				Obfuscate: &mustgatherv1alpha1.ObfuscateConfig{
+					Enabled: &enabled,
+					Source: &mustgatherv1alpha1.ObfuscateSourceConfig{
+						Claim: mustgatherv1alpha1.PersistentVolumeClaimReference{Name: "source-pvc"},
+					},
+				},
+			},
+			wantUpload:    true,
+			wantSourcePVC: "source-pvc",
+		},
+		{
+			name: "obfuscate source with subPath and upload target",
+			spec: mustgatherv1alpha1.MustGatherSpec{
+				ServiceAccountName: "default",
+				Obfuscate: &mustgatherv1alpha1.ObfuscateConfig{
+					Enabled: &enabled,
+					Source: &mustgatherv1alpha1.ObfuscateSourceConfig{
+						Claim:   mustgatherv1alpha1.PersistentVolumeClaimReference{Name: "bundle-pvc"},
+						SubPath: "must-gather-2026-06-25",
+					},
+				},
+				UploadTarget: &mustgatherv1alpha1.UploadTargetSpec{
+					Type: mustgatherv1alpha1.UploadTypeSFTP,
+					SFTP: &mustgatherv1alpha1.SFTPSpec{
+						CaseID: "1234",
+						CaseManagementAccountSecretRef: v1.LocalObjectReference{Name: "case-secret"},
+					},
+				},
+			},
+			wantUpload:    true,
+			wantSourcePVC: "bundle-pvc",
+			wantSubPath:   "must-gather-2026-06-25",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mg := mustgatherv1alpha1.MustGather{
+				ObjectMeta: metav1.ObjectMeta{Name: "mg", Namespace: "ns"},
+				Spec:       tt.spec,
+			}
+
+			job := getJobTemplate("image", "operator-image", mg, "")
+			if len(job.Spec.Template.Spec.Containers) != 1 {
+				t.Fatalf("expected exactly one container in source mode, got %d", len(job.Spec.Template.Spec.Containers))
+			}
+
+			_, hasGather := gatherContainerInJob(job)
+			if hasGather {
+				t.Fatalf("did not expect gather container in source PVC mode")
+			}
+
+			upload, ok := uploadContainerInJob(job)
+			if ok != tt.wantUpload {
+				t.Fatalf("expected upload container present=%v, got %v", tt.wantUpload, ok)
+			}
+
+			uploadCmd := upload.Command[2]
+			if strings.Contains(uploadCmd, "pgrep") {
+				t.Fatalf("did not expect pgrep in upload command for source PVC mode")
+			}
+			if !strings.Contains(uploadCmd, uploadCommandDirect) {
+				t.Fatalf("expected direct upload command for source PVC mode")
+			}
+
+			var outputVolume *v1.Volume
+			for i := range job.Spec.Template.Spec.Volumes {
+				if job.Spec.Template.Spec.Volumes[i].Name == outputVolumeName {
+					outputVolume = &job.Spec.Template.Spec.Volumes[i]
+					break
+				}
+			}
+			if outputVolume == nil || outputVolume.PersistentVolumeClaim == nil {
+				t.Fatalf("expected output volume to use source PVC")
+			}
+			if outputVolume.PersistentVolumeClaim.ClaimName != tt.wantSourcePVC {
+				t.Fatalf("expected source PVC %q, got %q", tt.wantSourcePVC, outputVolume.PersistentVolumeClaim.ClaimName)
+			}
+			if !outputVolume.PersistentVolumeClaim.ReadOnly {
+				t.Fatalf("expected source PVC volume to be read-only")
+			}
+
+			var outputMount *v1.VolumeMount
+			for i := range upload.VolumeMounts {
+				if upload.VolumeMounts[i].Name == outputVolumeName {
+					outputMount = &upload.VolumeMounts[i]
+					break
+				}
+			}
+			if outputMount == nil {
+				t.Fatalf("expected upload container output mount")
+			}
+			if !outputMount.ReadOnly {
+				t.Fatalf("expected upload source mount to be read-only")
+			}
+			if tt.wantSubPath != "" && outputMount.SubPath != tt.wantSubPath {
+				t.Fatalf("expected subPath %q, got %q", tt.wantSubPath, outputMount.SubPath)
+			}
+		})
+	}
+}
+
+func Test_getJobTemplate_ObfuscateUploadContract(t *testing.T) {
+	t.Setenv(DefaultMustGatherImageEnv, "quay.io/foo/bar/must-gather:latest")
+
+	enabled := true
+	mg := mustgatherv1alpha1.MustGather{
+		ObjectMeta: metav1.ObjectMeta{Name: "mg", Namespace: "ns"},
+		Spec: mustgatherv1alpha1.MustGatherSpec{
+			ServiceAccountName: "default",
+			Obfuscate: &mustgatherv1alpha1.ObfuscateConfig{
+				Enabled: &enabled,
+				ObfuscationConfigRef: &v1.LocalObjectReference{
+					Name: "custom-obfuscate-config",
+				},
+			},
+		},
+	}
+
+	job := getJobTemplate("image", "operator-image", mg, "")
+
+	upload, ok := uploadContainerInJob(job)
+	if !ok {
+		t.Fatalf("expected upload container when obfuscation enabled")
+	}
+	uploadEnv := envValues(upload)
+	if uploadEnv[obfuscateEnvEnabled] != "true" {
+		t.Fatalf("expected %s=true, got %q", obfuscateEnvEnabled, uploadEnv[obfuscateEnvEnabled])
+	}
+	if uploadEnv[obfuscateEnvConfig] != obfuscateConfigMountPath {
+		t.Fatalf("expected %s=%s, got %q", obfuscateEnvConfig, obfuscateConfigMountPath, uploadEnv[obfuscateEnvConfig])
+	}
+
+	var configVolume *v1.Volume
+	for i := range job.Spec.Template.Spec.Volumes {
+		if job.Spec.Template.Spec.Volumes[i].Name == obfuscateConfigVolumeName {
+			configVolume = &job.Spec.Template.Spec.Volumes[i]
+			break
+		}
+	}
+	if configVolume == nil {
+		t.Fatalf("expected job volume %q", obfuscateConfigVolumeName)
+	}
+	if configVolume.ConfigMap == nil || configVolume.ConfigMap.Name != "custom-obfuscate-config" {
+		t.Fatalf("expected obfuscate config volume to reference custom-obfuscate-config ConfigMap")
+	}
+}
+
+func Test_getJobTemplate_ObfuscationModes(t *testing.T) {
+	t.Setenv(DefaultMustGatherImageEnv, "quay.io/foo/bar/must-gather:latest")
+
+	enabled := true
+	disabled := false
+
+	tests := []struct {
+		name              string
+		spec              mustgatherv1alpha1.MustGatherSpec
+		wantGather        bool
+		wantChown         bool
+		wantUpload        bool
+		wantObfuscateEnv  bool
+		wantSFTP          bool
+		wantPgrep         bool
+		wantSourcePVC     string
+		wantSourceSubPath string
+		wantConfigMount   bool
+		wantConfigVolume  string
+	}{
+		{
+			name: "mode 1 gather obfuscate and upload",
+			spec: mustgatherv1alpha1.MustGatherSpec{
+				ServiceAccountName: "default",
+				Obfuscate: &mustgatherv1alpha1.ObfuscateConfig{
+					Enabled: &enabled,
+				},
+				UploadTarget: &mustgatherv1alpha1.UploadTargetSpec{
+					Type: mustgatherv1alpha1.UploadTypeSFTP,
+					SFTP: &mustgatherv1alpha1.SFTPSpec{
+						CaseID: "case-1",
+						CaseManagementAccountSecretRef: v1.LocalObjectReference{Name: "case-secret"},
+					},
+				},
+			},
+			wantGather:       true,
+			wantChown:        true,
+			wantUpload:       true,
+			wantObfuscateEnv: true,
+			wantSFTP:         true,
+			wantPgrep:        true,
+		},
+		{
+			name: "mode 1 with custom obfuscation config ref",
+			spec: mustgatherv1alpha1.MustGatherSpec{
+				ServiceAccountName: "default",
+				Obfuscate: &mustgatherv1alpha1.ObfuscateConfig{
+					Enabled: &enabled,
+					ObfuscationConfigRef: &v1.LocalObjectReference{
+						Name: "my-obfuscate-config",
+					},
+				},
+				UploadTarget: &mustgatherv1alpha1.UploadTargetSpec{
+					Type: mustgatherv1alpha1.UploadTypeSFTP,
+					SFTP: &mustgatherv1alpha1.SFTPSpec{
+						CaseID: "case-2",
+						CaseManagementAccountSecretRef: v1.LocalObjectReference{Name: "case-secret"},
+					},
+				},
+			},
+			wantGather:       true,
+			wantChown:        true,
+			wantUpload:       true,
+			wantObfuscateEnv: true,
+			wantSFTP:         true,
+			wantPgrep:        true,
+			wantConfigMount:  true,
+			wantConfigVolume: "my-obfuscate-config",
+		},
+		{
+			name: "mode 2 obfuscate-only from source PVC",
+			spec: mustgatherv1alpha1.MustGatherSpec{
+				ServiceAccountName: "default",
+				Obfuscate: &mustgatherv1alpha1.ObfuscateConfig{
+					Enabled: &enabled,
+					Source: &mustgatherv1alpha1.ObfuscateSourceConfig{
+						Claim: mustgatherv1alpha1.PersistentVolumeClaimReference{Name: "source-pvc"},
+					},
+				},
+			},
+			wantUpload:       true,
+			wantObfuscateEnv: true,
+			wantSourcePVC:    "source-pvc",
+		},
+		{
+			name: "mode 3 obfuscate upload from source PVC",
+			spec: mustgatherv1alpha1.MustGatherSpec{
+				ServiceAccountName: "default",
+				Obfuscate: &mustgatherv1alpha1.ObfuscateConfig{
+					Enabled: &enabled,
+					Source: &mustgatherv1alpha1.ObfuscateSourceConfig{
+						Claim:   mustgatherv1alpha1.PersistentVolumeClaimReference{Name: "bundle-pvc"},
+						SubPath: "must-gather-2026-06-25",
+					},
+				},
+				UploadTarget: &mustgatherv1alpha1.UploadTargetSpec{
+					Type: mustgatherv1alpha1.UploadTypeSFTP,
+					SFTP: &mustgatherv1alpha1.SFTPSpec{
+						CaseID: "case-3",
+						CaseManagementAccountSecretRef: v1.LocalObjectReference{Name: "case-secret"},
+					},
+				},
+			},
+			wantUpload:        true,
+			wantObfuscateEnv:  true,
+			wantSFTP:          true,
+			wantSourcePVC:     "bundle-pvc",
+			wantSourceSubPath: "must-gather-2026-06-25",
+		},
+		{
+			name: "negative obfuscate disabled preserves legacy upload gating",
+			spec: mustgatherv1alpha1.MustGatherSpec{
+				ServiceAccountName: "default",
+				Obfuscate: &mustgatherv1alpha1.ObfuscateConfig{
+					Enabled: &disabled,
+				},
+				UploadTarget: &mustgatherv1alpha1.UploadTargetSpec{
+					Type: mustgatherv1alpha1.UploadTypeSFTP,
+					SFTP: &mustgatherv1alpha1.SFTPSpec{
+						CaseID: "legacy-case",
+						CaseManagementAccountSecretRef: v1.LocalObjectReference{Name: "legacy-secret"},
+					},
+				},
+			},
+			wantGather: true,
+			wantUpload: true,
+			wantSFTP:   true,
+			wantPgrep:  true,
+		},
+		{
+			name: "negative no obfuscate and no uploadTarget",
+			spec: mustgatherv1alpha1.MustGatherSpec{
+				ServiceAccountName: "default",
+			},
+			wantGather: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mg := mustgatherv1alpha1.MustGather{
+				ObjectMeta: metav1.ObjectMeta{Name: "mg", Namespace: "ns"},
+				Spec:       tt.spec,
+			}
+
+			job := getJobTemplate("image", "operator-image", mg, "")
+
+			gather, hasGather := gatherContainerInJob(job)
+			if hasGather != tt.wantGather {
+				t.Fatalf("expected gather container present=%v, got %v", tt.wantGather, hasGather)
+			}
+			if tt.wantGather {
+				gatherCmd := gather.Command[2]
+				hasChown := strings.Contains(gatherCmd, obfuscateChownSuffix)
+				if hasChown != tt.wantChown {
+					t.Fatalf("expected chown in gather command=%v, got %v", tt.wantChown, hasChown)
+				}
+			}
+
+			upload, hasUpload := uploadContainerInJob(job)
+			if hasUpload != tt.wantUpload {
+				t.Fatalf("expected upload container present=%v, got %v", tt.wantUpload, hasUpload)
+			}
+			if !tt.wantUpload {
+				return
+			}
+
+			uploadEnv := envValues(upload)
+			if tt.wantObfuscateEnv {
+				if uploadEnv[obfuscateEnvEnabled] != "true" {
+					t.Fatalf("expected %s=true", obfuscateEnvEnabled)
+				}
+			} else if _, ok := uploadEnv[obfuscateEnvEnabled]; ok {
+				t.Fatalf("did not expect %s env var", obfuscateEnvEnabled)
+			}
+
+			uploadCmd := upload.Command[2]
+			hasPgrep := strings.Contains(uploadCmd, "pgrep")
+			if hasPgrep != tt.wantPgrep {
+				t.Fatalf("expected pgrep in upload command=%v, got %v", tt.wantPgrep, hasPgrep)
+			}
+
+			if tt.wantSFTP {
+				if uploadEnv[uploadEnvCaseId] == "" {
+					t.Fatalf("expected SFTP case ID env var")
+				}
+				if !hasSecretEnv(upload, uploadEnvUsername) {
+					t.Fatalf("expected SFTP username secret env var")
+				}
+			} else if hasSecretEnv(upload, uploadEnvUsername) {
+				t.Fatalf("did not expect SFTP credential env vars")
+			}
+
+			if tt.wantSourcePVC != "" {
+				if hasGather {
+					t.Fatalf("did not expect gather container when source PVC is set")
+				}
+				var outputVolume *v1.Volume
+				for i := range job.Spec.Template.Spec.Volumes {
+					if job.Spec.Template.Spec.Volumes[i].Name == outputVolumeName {
+						outputVolume = &job.Spec.Template.Spec.Volumes[i]
+						break
+					}
+				}
+				if outputVolume == nil || outputVolume.PersistentVolumeClaim == nil {
+					t.Fatalf("expected source PVC on output volume")
+				}
+				if outputVolume.PersistentVolumeClaim.ClaimName != tt.wantSourcePVC {
+					t.Fatalf("expected source PVC %q, got %q", tt.wantSourcePVC, outputVolume.PersistentVolumeClaim.ClaimName)
+				}
+				if !outputVolume.PersistentVolumeClaim.ReadOnly {
+					t.Fatalf("expected source PVC volume to be read-only")
+				}
+
+				var outputMount *v1.VolumeMount
+				for i := range upload.VolumeMounts {
+					if upload.VolumeMounts[i].Name == outputVolumeName {
+						outputMount = &upload.VolumeMounts[i]
+						break
+					}
+				}
+				if outputMount == nil || !outputMount.ReadOnly {
+					t.Fatalf("expected read-only source PVC mount on upload container")
+				}
+				if tt.wantSourceSubPath != "" && outputMount.SubPath != tt.wantSourceSubPath {
+					t.Fatalf("expected source subPath %q, got %q", tt.wantSourceSubPath, outputMount.SubPath)
+				}
+			}
+
+			if tt.wantConfigMount {
+				if uploadEnv[obfuscateEnvConfig] != obfuscateConfigMountPath {
+					t.Fatalf("expected %s=%s", obfuscateEnvConfig, obfuscateConfigMountPath)
+				}
+				var configMount *v1.VolumeMount
+				for i := range upload.VolumeMounts {
+					if upload.VolumeMounts[i].Name == obfuscateConfigVolumeName {
+						configMount = &upload.VolumeMounts[i]
+						break
+					}
+				}
+				if configMount == nil {
+					t.Fatalf("expected obfuscate config volume mount on upload container")
+				}
+				if configMount.MountPath != obfuscateConfigMountPath {
+					t.Fatalf("expected config mount path %q, got %q", obfuscateConfigMountPath, configMount.MountPath)
+				}
+				if configMount.SubPath != obfuscateConfigMapKey {
+					t.Fatalf("expected config subPath %q, got %q", obfuscateConfigMapKey, configMount.SubPath)
+				}
+			}
+
+			if tt.wantConfigVolume != "" {
+				var configVolume *v1.Volume
+				for i := range job.Spec.Template.Spec.Volumes {
+					if job.Spec.Template.Spec.Volumes[i].Name == obfuscateConfigVolumeName {
+						configVolume = &job.Spec.Template.Spec.Volumes[i]
+						break
+					}
+				}
+				if configVolume == nil || configVolume.ConfigMap == nil {
+					t.Fatalf("expected obfuscate config volume in job spec")
+				}
+				if configVolume.ConfigMap.Name != tt.wantConfigVolume {
+					t.Fatalf("expected config volume %q, got %q", tt.wantConfigVolume, configVolume.ConfigMap.Name)
 				}
 			}
 		})
@@ -729,6 +1492,35 @@ func findGatherContainerInJob(t *testing.T, job *batchv1.Job) v1.Container {
 	}
 	t.Fatalf("gather container not found in job")
 	return v1.Container{}
+}
+
+// helper to find gather container in a job, if present
+func gatherContainerInJob(job *batchv1.Job) (v1.Container, bool) {
+	for _, c := range job.Spec.Template.Spec.Containers {
+		if c.Name == gatherContainerName {
+			return c, true
+		}
+	}
+	return v1.Container{}, false
+}
+
+// helper to find upload container in a job, if present
+func uploadContainerInJob(job *batchv1.Job) (v1.Container, bool) {
+	for _, c := range job.Spec.Template.Spec.Containers {
+		if c.Name == uploadContainerName {
+			return c, true
+		}
+	}
+	return v1.Container{}, false
+}
+
+func hasSecretEnv(container v1.Container, name string) bool {
+	for _, env := range container.Env {
+		if env.Name == name && env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // helper to find upload container in a job

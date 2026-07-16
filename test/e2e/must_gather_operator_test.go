@@ -12,12 +12,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math/rand"
 	"net"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -46,6 +48,7 @@ import (
 type MustGatherCROptions struct {
 	UploadTarget     *UploadTargetOptions
 	PersistentVolume *PersistentVolumeOptions
+	Obfuscate        *ObfuscateOptions
 	Timeout          *time.Duration
 	ImageStreamRef   *mustgatherv1alpha1.ImageStreamTagRef
 	GatherSpec       *mustgatherv1alpha1.GatherSpec
@@ -63,6 +66,14 @@ type UploadTargetOptions struct {
 type PersistentVolumeOptions struct {
 	PVCName string
 	SubPath string
+}
+
+// ObfuscateOptions configures obfuscation on a MustGather CR
+type ObfuscateOptions struct {
+	Enabled       *bool
+	ConfigMapName string
+	SourcePVC     string
+	SourceSubPath string
 }
 
 // Test suite constants
@@ -97,13 +108,24 @@ const (
 	trustedCAConfigMapEnvVar = "TRUSTED_CA_CONFIGMAP_NAME"
 	trustedCAVolumeNameE2E   = "trusted-ca"
 	trustedCAMountPathE2E    = "/etc/pki/tls/certs"
+
+	// Obfuscation E2E constants
+	obfuscationLogRunning      = "Running obfuscation"
+	obfuscationLogComplete       = "Obfuscation complete."
+	bundleSampleDir              = "must-gather-bundle-sample"
+	obfuscationConfigMapFixture  = "obfuscation-configmap.yaml"
+	e2eObfuscationConfigMapName  = "e2e-obfuscation-rules"
+	obfuscationSourceSubPath     = "must-gather-data"
+	sampleBundleIP               = "10.0.0.5"
+	sampleBundleMAC              = "aa:bb:cc:dd:ee:ff"
+	obfuscatedIPTokenPattern     = `x-ipv4-\d{10}-x`
 	// vaultOfflineTokenKey is the RH SSO offline refresh token mounted from Vault for CI.
 	vaultOfflineTokenKey          = "offline-token-e2e"
 	refreshSFTPTokenScript        = "refresh-sftp-token.sh"
 	refreshSFTPTokenScriptTimeout = 60 * time.Second
 )
 
-//go:embed testdata/*
+//go:embed all:testdata
 var testassets embed.FS
 
 // Test suite variables
@@ -1843,6 +1865,387 @@ var _ = ginkgo.Describe("MustGather resource", ginkgo.Ordered, func() {
 
 	})
 
+	ginkgo.Context("Obfuscation Mode 1: Gather + Obfuscate + Upload", func() {
+		// Acceptance mapping: SC-001 (pipeline), SC-002 (Secret omission), SC-003 (consistent IP), SC-007 (report.yaml)
+		var mustGatherName string
+		var mustGatherCR *mustgatherv1alpha1.MustGather
+
+		ginkgo.BeforeEach(func() {
+			mustGatherName = fmt.Sprintf("mg-obfuscate-mode1-%d", time.Now().UnixNano())
+		})
+
+		ginkgo.AfterEach(func() {
+			if mustGatherCR != nil {
+				ginkgo.By("Cleaning up MustGather CR")
+				_ = nonAdminClient.Delete(testCtx, mustGatherCR)
+
+				Eventually(func() bool {
+					err := nonAdminClient.Get(testCtx, client.ObjectKey{
+						Name:      mustGatherName,
+						Namespace: ns.Name,
+					}, &mustgatherv1alpha1.MustGather{})
+					return apierrors.IsNotFound(err)
+				}).WithTimeout(2 * time.Minute).WithPolling(5 * time.Second).Should(BeTrue())
+
+				mustGatherCR = nil
+			}
+		})
+
+		ginkgo.It("should gather, obfuscate with default config, and upload to SFTP [Skipped:Disconnected]", func() {
+			ginkgo.By("Setting up SFTP credentials and MustGather CR with default obfuscation (US-1, SC-001)")
+			ensureObfuscationSFTPSecret(ns.Name)
+			caseID := generateTestCaseID()
+			enabled := true
+			mustGatherCR = createMustGatherCR(mustGatherName, ns.Name, serviceAccount, true, &MustGatherCROptions{
+				UploadTarget: &UploadTargetOptions{CaseID: caseID, SecretName: caseManagementSecretNameValid, InternalUser: false, Host: prodHostName},
+				Obfuscate:    &ObfuscateOptions{Enabled: &enabled},
+				GatherSpec: &mustgatherv1alpha1.GatherSpec{
+					Command: []string{"/bin/bash"},
+					Args:    []string{"-c", obfuscationMode1GatherScript()},
+				},
+			})
+
+			job, mustGatherPod := waitForObfuscationMode1JobSuccess(mustGatherName, ns.Name)
+			assertJobHasGatherAndUploadContainers(job)
+			assertUploadContainerObfuscateEnabled(job, false)
+
+			ginkgo.By("Verifying upload container logs contain obfuscation markers (SC-007)")
+			assertUploadLogsContainObfuscation(ns.Name, mustGatherPod.Name)
+
+			ginkgo.By("Verifying SFTP upload and obfuscated bundle content (SC-002, SC-003, SC-007)")
+			found, inspectLogs, err := verifyAndInspectObfuscatedSFTPUpload(
+				ns.Name, caseManagementSecretNameValid, prodHostName, caseID, false,
+				obfuscationBundleInspectExpectations{
+					expectObfuscatedIP: true,
+					expectRawIPAbsent:  true,
+					expectSecretOmitted: true,
+					expectMACPreserved: false,
+					expectReportYAML:   true,
+				},
+			)
+			Expect(err).NotTo(HaveOccurred(), "SFTP bundle inspection should succeed")
+			ginkgo.GinkgoWriter.Printf("SFTP bundle inspection:\n%s\n", inspectLogs)
+			Expect(found).To(BeTrue(), "obfuscated bundle should be uploaded to SFTP for caseID %s", caseID)
+
+			ginkgo.By("Verifying MustGather CR completed successfully")
+			assertMustGatherCompleted(mustGatherName, ns.Name)
+		})
+
+		ginkgo.It("should gather, obfuscate with custom IP-only config, and upload to SFTP [Skipped:Disconnected]", func() {
+			ginkgo.By("Creating custom obfuscation ConfigMap in operator namespace (US-2)")
+			loader.CreateFromFile(testassets.ReadFile, filepath.Join("testdata", obfuscationConfigMapFixture), operatorNamespace)
+			defer func() {
+				cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: e2eObfuscationConfigMapName, Namespace: operatorNamespace}}
+				_ = adminClient.Delete(testCtx, cm)
+			}()
+
+			ensureObfuscationSFTPSecret(ns.Name)
+			caseID := generateTestCaseID()
+			enabled := true
+			mustGatherCR = createMustGatherCR(mustGatherName, ns.Name, serviceAccount, true, &MustGatherCROptions{
+				UploadTarget: &UploadTargetOptions{CaseID: caseID, SecretName: caseManagementSecretNameValid, InternalUser: false, Host: prodHostName},
+				Obfuscate:    &ObfuscateOptions{Enabled: &enabled, ConfigMapName: e2eObfuscationConfigMapName},
+				GatherSpec: &mustgatherv1alpha1.GatherSpec{
+					Command: []string{"/bin/bash"},
+					Args:    []string{"-c", obfuscationMode1GatherScript()},
+				},
+			})
+
+			ginkgo.By("Waiting for obfuscate ConfigMap to be copied into MustGather namespace")
+			Eventually(func() error {
+				return adminClient.Get(testCtx, client.ObjectKey{
+					Namespace: ns.Name,
+					Name:      e2eObfuscationConfigMapName,
+				}, &corev1.ConfigMap{})
+			}).WithTimeout(2*time.Minute).WithPolling(5*time.Second).Should(Succeed(),
+				"operator should copy obfuscation ConfigMap into MustGather namespace")
+
+			job, mustGatherPod := waitForObfuscationMode1JobSuccess(mustGatherName, ns.Name)
+			assertJobHasGatherAndUploadContainers(job)
+			assertUploadContainerObfuscateEnabled(job, true)
+
+			ginkgo.By("Verifying upload container logs contain obfuscation markers (SC-007)")
+			assertUploadLogsContainObfuscation(ns.Name, mustGatherPod.Name)
+
+			ginkgo.By("Verifying SFTP upload with IP obfuscated and MAC preserved (SC-003)")
+			found, inspectLogs, err := verifyAndInspectObfuscatedSFTPUpload(
+				ns.Name, caseManagementSecretNameValid, prodHostName, caseID, false,
+				obfuscationBundleInspectExpectations{
+					expectObfuscatedIP: true,
+					expectRawIPAbsent:  true,
+					expectSecretOmitted: false,
+					expectMACPreserved: true,
+					expectReportYAML:   true,
+				},
+			)
+			Expect(err).NotTo(HaveOccurred(), "SFTP bundle inspection should succeed")
+			ginkgo.GinkgoWriter.Printf("SFTP bundle inspection:\n%s\n", inspectLogs)
+			Expect(found).To(BeTrue(), "obfuscated bundle should be uploaded to SFTP for caseID %s", caseID)
+
+			ginkgo.By("Verifying MustGather CR completed successfully")
+			assertMustGatherCompleted(mustGatherName, ns.Name)
+		})
+	})
+
+	ginkgo.Context("Obfuscation Mode 2/3: Source PVC", func() {
+		// Acceptance mapping: SC-004 (obfuscate-only without SFTP), SC-005 (obfuscate+upload from source), SC-007 (report.yaml)
+		var mustGatherName string
+		var mustGatherCR *mustgatherv1alpha1.MustGather
+
+		ginkgo.BeforeEach(func() {
+			mustGatherName = fmt.Sprintf("mg-obfuscate-source-%d", time.Now().UnixNano())
+
+			ginkgo.By("Creating PersistentVolumeClaim for obfuscation source tests")
+			loader.CreateFromFile(testassets.ReadFile, filepath.Join("testdata", "must-gather-pvc.yaml"), ns.Name)
+
+			ginkgo.By("Waiting for PVC to be created")
+			pvc := &corev1.PersistentVolumeClaim{}
+			Eventually(func() error {
+				return nonAdminClient.Get(testCtx, client.ObjectKey{
+					Name:      mustGatherPVCName,
+					Namespace: ns.Name,
+				}, pvc)
+			}).WithTimeout(3*time.Minute).WithPolling(5*time.Second).Should(Succeed(),
+				"PVC should be created for obfuscation source tests")
+
+			ginkgo.By("Seeding PVC with sample must-gather bundle")
+			seedPVCWithSampleBundle(ns.Name, mustGatherPVCName, obfuscationSourceSubPath)
+		})
+
+		ginkgo.AfterEach(func() {
+			if mustGatherCR != nil {
+				ginkgo.By("Cleaning up MustGather CR")
+				_ = nonAdminClient.Delete(testCtx, mustGatherCR)
+
+				Eventually(func() bool {
+					err := nonAdminClient.Get(testCtx, client.ObjectKey{
+						Name:      mustGatherName,
+						Namespace: ns.Name,
+					}, &mustgatherv1alpha1.MustGather{})
+					return apierrors.IsNotFound(err)
+				}).WithTimeout(2 * time.Minute).WithPolling(5 * time.Second).Should(BeTrue())
+
+				mustGatherCR = nil
+			}
+
+			ginkgo.By("Cleaning up PVC")
+			loader.DeleteFromFile(testassets.ReadFile, filepath.Join("testdata", "must-gather-pvc.yaml"), ns.Name)
+
+			Eventually(func() bool {
+				pvc := &corev1.PersistentVolumeClaim{}
+				err := nonAdminClient.Get(testCtx, client.ObjectKey{
+					Name:      mustGatherPVCName,
+					Namespace: ns.Name,
+				}, pvc)
+				return apierrors.IsNotFound(err)
+			}).WithTimeout(2*time.Minute).WithPolling(5*time.Second).Should(BeTrue(),
+				"PVC should be fully deleted before next test runs")
+		})
+
+		ginkgo.It("should obfuscate from source PVC without SFTP credentials (US-3, SC-004, SC-007)", func() {
+			enabled := true
+			mustGatherCR = createMustGatherCR(mustGatherName, ns.Name, serviceAccount, true, &MustGatherCROptions{
+				Obfuscate: &ObfuscateOptions{
+					Enabled:       &enabled,
+					SourcePVC:     mustGatherPVCName,
+					SourceSubPath: obfuscationSourceSubPath,
+				},
+			})
+
+			job, mustGatherPod := waitForObfuscationSourceJobSuccess(mustGatherName, ns.Name)
+			assertJobHasUploadContainerOnly(job)
+			assertUploadContainerObfuscateEnabled(job, false)
+			assertUploadContainerNoSFTPCredentials(job)
+
+			ginkgo.By("Verifying upload container logs contain obfuscation markers (SC-007)")
+			assertUploadLogsContainObfuscation(ns.Name, mustGatherPod.Name)
+
+			ginkgo.By("Verifying source PVC content is unchanged")
+			sourceLogs := readObfuscationSourcePVC(ns.Name, mustGatherPVCName, obfuscationSourceSubPath)
+			ginkgo.GinkgoWriter.Printf("Source PVC inspection:\n%s\n", sourceLogs)
+			Expect(sourceLogs).To(ContainSubstring(sampleBundleIP),
+				"source PVC should retain raw IP after obfuscate-only run")
+			Expect(sourceLogs).To(ContainSubstring("SECRET_PRESENT"),
+				"source PVC should retain Secret YAML after obfuscate-only run")
+
+			ginkgo.By("Verifying upload container logs confirm obfuscate-only completion without SFTP (SC-004)")
+			uploadLogs, err := getContainerLogs(ns.Name, mustGatherPod.Name, uploadContainerName)
+			Expect(err).NotTo(HaveOccurred(), "Failed to get upload container logs")
+			Expect(uploadLogs).To(ContainSubstring("SFTP credentials not provided — skipping upload"),
+				"obfuscate-only should complete without SFTP credentials")
+
+			ginkgo.By("Verifying cleaned staging contains obfuscated output and report.yaml")
+			assertCleanedStagingInUploadPod(ns.Name, mustGatherPod.Name)
+
+			ginkgo.By("Verifying MustGather CR completed successfully")
+			assertMustGatherCompleted(mustGatherName, ns.Name)
+		})
+
+		ginkgo.It("should obfuscate from source PVC and upload to SFTP [Skipped:Disconnected]", func() {
+			ensureObfuscationSFTPSecret(ns.Name)
+			caseID := generateTestCaseID()
+			enabled := true
+			mustGatherCR = createMustGatherCR(mustGatherName, ns.Name, serviceAccount, true, &MustGatherCROptions{
+				UploadTarget: &UploadTargetOptions{
+					CaseID:       caseID,
+					SecretName:   caseManagementSecretNameValid,
+					InternalUser: false,
+					Host:         prodHostName,
+				},
+				Obfuscate: &ObfuscateOptions{
+					Enabled:       &enabled,
+					SourcePVC:     mustGatherPVCName,
+					SourceSubPath: obfuscationSourceSubPath,
+				},
+			})
+
+			job, mustGatherPod := waitForObfuscationSourceJobSuccess(mustGatherName, ns.Name)
+			assertJobHasUploadContainerOnly(job)
+			assertUploadContainerObfuscateEnabled(job, false)
+
+			ginkgo.By("Verifying upload container logs contain obfuscation markers (SC-007)")
+			assertUploadLogsContainObfuscation(ns.Name, mustGatherPod.Name)
+
+			ginkgo.By("Verifying source PVC content is unchanged")
+			sourceLogs := readObfuscationSourcePVC(ns.Name, mustGatherPVCName, obfuscationSourceSubPath)
+			Expect(sourceLogs).To(ContainSubstring(sampleBundleIP),
+				"source PVC should retain raw IP after obfuscate+upload run")
+
+			ginkgo.By("Verifying SFTP upload after obfuscation from source PVC (US-4, SC-005)")
+			found, inspectLogs, err := verifyAndInspectObfuscatedSFTPUpload(
+				ns.Name, caseManagementSecretNameValid, prodHostName, caseID, false,
+				obfuscationBundleInspectExpectations{
+					expectObfuscatedIP:  true,
+					expectRawIPAbsent:   true,
+					expectSecretOmitted: true,
+					expectMACPreserved:  false,
+					expectReportYAML:    true,
+				},
+			)
+			Expect(err).NotTo(HaveOccurred(), "SFTP bundle inspection should succeed")
+			ginkgo.GinkgoWriter.Printf("SFTP bundle inspection:\n%s\n", inspectLogs)
+			Expect(found).To(BeTrue(), "obfuscated bundle from source PVC should upload to SFTP for caseID %s", caseID)
+
+			ginkgo.By("Verifying MustGather CR completed successfully")
+			assertMustGatherCompleted(mustGatherName, ns.Name)
+		})
+	})
+
+	ginkgo.Context("Obfuscation Backward Compatibility and Validation", func() {
+		// Acceptance mapping: SC-006 (no obfuscation when field omitted), SC-008 (source without enabled rejected)
+		var mustGatherName string
+		var mustGatherCR *mustgatherv1alpha1.MustGather
+
+		ginkgo.BeforeEach(func() {
+			mustGatherName = fmt.Sprintf("mg-obfuscate-compat-%d", time.Now().UnixNano())
+		})
+
+		ginkgo.AfterEach(func() {
+			if mustGatherCR != nil {
+				ginkgo.By("Cleaning up MustGather CR")
+				_ = nonAdminClient.Delete(testCtx, mustGatherCR)
+
+				Eventually(func() bool {
+					err := nonAdminClient.Get(testCtx, client.ObjectKey{
+						Name:      mustGatherName,
+						Namespace: ns.Name,
+					}, &mustgatherv1alpha1.MustGather{})
+					return apierrors.IsNotFound(err)
+				}).WithTimeout(2 * time.Minute).WithPolling(5 * time.Second).Should(BeTrue())
+
+				mustGatherCR = nil
+			}
+		})
+
+		ginkgo.It("should run legacy gather and upload without obfuscation when obfuscate is omitted [Skipped:Disconnected]", func() {
+			ginkgo.By("Creating MustGather CR with UploadTarget but no obfuscate field (US-5, SC-006)")
+			ensureObfuscationSFTPSecret(ns.Name)
+			caseID := generateTestCaseID()
+			mustGatherCR = createMustGatherCR(mustGatherName, ns.Name, serviceAccount, true, &MustGatherCROptions{
+				UploadTarget: &UploadTargetOptions{
+					CaseID:       caseID,
+					SecretName:   caseManagementSecretNameValid,
+					InternalUser: false,
+					Host:         prodHostName,
+				},
+				GatherSpec: &mustgatherv1alpha1.GatherSpec{
+					Command: []string{"/bin/bash"},
+					Args:    []string{"-c", obfuscationMode1GatherScript()},
+				},
+			})
+
+			fetchedMG := &mustgatherv1alpha1.MustGather{}
+			err := nonAdminClient.Get(testCtx, client.ObjectKey{Name: mustGatherName, Namespace: ns.Name}, fetchedMG)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(fetchedMG.Spec.Obfuscate).To(BeNil(), "legacy CR should not set obfuscate field")
+
+			job, mustGatherPod := waitForObfuscationMode1JobSuccess(mustGatherName, ns.Name)
+			assertJobHasGatherAndUploadContainers(job)
+			assertUploadContainerObfuscateDisabled(job)
+
+			ginkgo.By("Verifying upload container logs do not contain obfuscation markers")
+			assertUploadLogsDoNotContainObfuscation(ns.Name, mustGatherPod.Name)
+
+			ginkgo.By("Verifying legacy SFTP upload still succeeds")
+			found, sftpLogs, err := verifySFTPUpload(ns.Name, caseManagementSecretNameValid, prodHostName, caseID, false)
+			Expect(err).NotTo(HaveOccurred(), "SFTP verification should succeed for legacy upload")
+			ginkgo.GinkgoWriter.Printf("SFTP directory listing:\n%s\n", sftpLogs)
+			Expect(found).To(BeTrue(), "legacy upload should place bundle on SFTP for caseID %s", caseID)
+
+			assertMustGatherCompleted(mustGatherName, ns.Name)
+		})
+
+		ginkgo.It("should reject MustGather with obfuscate.source when enabled is false or omitted (SC-008)", func() {
+			source := &mustgatherv1alpha1.ObfuscateSourceConfig{
+				Claim: mustgatherv1alpha1.PersistentVolumeClaimReference{Name: mustGatherPVCName},
+				SubPath: obfuscationSourceSubPath,
+			}
+			disabled := false
+
+			invalidCases := []struct {
+				caseName string
+				obfuscate mustgatherv1alpha1.ObfuscateConfig
+			}{
+				{
+					caseName: "enabled omitted",
+					obfuscate: mustgatherv1alpha1.ObfuscateConfig{Source: source},
+				},
+				{
+					caseName: "enabled false",
+					obfuscate: mustgatherv1alpha1.ObfuscateConfig{
+						Enabled: &disabled,
+						Source:  source,
+					},
+				},
+			}
+
+			for _, tc := range invalidCases {
+				tc := tc
+				ginkgo.By(fmt.Sprintf("Attempting invalid CR create with obfuscate.source and %s", tc.caseName))
+				crName := fmt.Sprintf("%s-%s", mustGatherName, strings.ReplaceAll(tc.caseName, " ", "-"))
+				mg := &mustgatherv1alpha1.MustGather{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      crName,
+						Namespace: ns.Name,
+						Labels:    map[string]string{"test": nonAdminLabel},
+					},
+					Spec: mustgatherv1alpha1.MustGatherSpec{
+						ServiceAccountName: serviceAccount,
+						Obfuscate:          &tc.obfuscate,
+					},
+				}
+
+				err := nonAdminClient.Create(testCtx, mg)
+				Expect(err).To(HaveOccurred(), "apiserver should reject obfuscate.source without enabled=true")
+				Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected Invalid (422) from CRD validation, got: %v", err)
+				Expect(strings.ToLower(err.Error())).To(Or(
+					ContainSubstring("obfuscate.source requires obfuscate.enabled"),
+					ContainSubstring("obfuscate.source"),
+				), "error should describe obfuscate.source/enabled validation failure")
+			}
+		})
+	})
+
 	ginkgo.Context("Custom Image [apigroup:image.openshift.io] [Skipped:Disconnected]", func() {
 		var mustGatherName string
 		var mustGatherCR *mustgatherv1alpha1.MustGather
@@ -3358,6 +3761,30 @@ func createMustGatherCR(name, namespace, serviceAccountName string, retainResour
 		if opts.GatherSpec != nil {
 			mg.Spec.GatherSpec = opts.GatherSpec
 		}
+
+		if opts.Obfuscate != nil {
+			obf := &mustgatherv1alpha1.ObfuscateConfig{}
+			if opts.Obfuscate.Enabled != nil {
+				obf.Enabled = opts.Obfuscate.Enabled
+			} else if opts.Obfuscate.ConfigMapName != "" || opts.Obfuscate.SourcePVC != "" {
+				enabled := true
+				obf.Enabled = &enabled
+			}
+			if opts.Obfuscate.ConfigMapName != "" {
+				obf.ObfuscationConfigRef = &corev1.LocalObjectReference{
+					Name: opts.Obfuscate.ConfigMapName,
+				}
+			}
+			if opts.Obfuscate.SourcePVC != "" {
+				obf.Source = &mustgatherv1alpha1.ObfuscateSourceConfig{
+					Claim: mustgatherv1alpha1.PersistentVolumeClaimReference{
+						Name: opts.Obfuscate.SourcePVC,
+					},
+					SubPath: opts.Obfuscate.SourceSubPath,
+				}
+			}
+			mg.Spec.Obfuscate = obf
+		}
 	}
 
 	err := nonAdminClient.Create(testCtx, mg)
@@ -3845,4 +4272,587 @@ func deleteImageStream(name string) {
 	if err != nil && !apierrors.IsNotFound(err) {
 		Expect(err).NotTo(HaveOccurred(), "Failed to delete ImageStream")
 	}
+}
+
+var obfuscatedIPRegexp = regexp.MustCompile(obfuscatedIPTokenPattern)
+
+type obfuscationBundleInspectExpectations struct {
+	expectObfuscatedIP  bool
+	expectRawIPAbsent   bool
+	expectSecretOmitted bool
+	expectMACPreserved  bool
+	expectReportYAML    bool
+}
+
+// obfuscationMode1GatherScript writes embedded sample bundle files for a fast deterministic gather.
+func obfuscationMode1GatherScript() string {
+	var script strings.Builder
+	script.WriteString("set -e\nmkdir -p /must-gather/sample\n")
+	bundlePath := filepath.Join("testdata", bundleSampleDir)
+	entries, err := testassets.ReadDir(bundlePath)
+	Expect(err).NotTo(HaveOccurred(), "Failed to read embedded bundle sample directory")
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		content, readErr := testassets.ReadFile(filepath.Join(bundlePath, entry.Name()))
+		Expect(readErr).NotTo(HaveOccurred(), "Failed to read embedded bundle file %s", entry.Name())
+		target := filepath.Join("/must-gather/sample", entry.Name())
+		script.WriteString(fmt.Sprintf("cat > %q <<'EOFBUNDLE'\n%sEOFBUNDLE\n", target, string(content)))
+	}
+	script.WriteString("chown -R 65534:65534 /must-gather\n")
+	return script.String()
+}
+
+func ensureObfuscationSFTPSecret(namespace string) {
+	ginkgo.By("Creating case-management-creds-valid secret for obfuscation upload tests")
+	sftpUsername, sftpPassword, err := getCaseCreds()
+	Expect(err).NotTo(HaveOccurred(), "Failed to get SFTP credentials")
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      caseManagementSecretNameValid,
+			Namespace: namespace,
+			Labels:    map[string]string{"test": nonAdminLabel},
+		},
+		Type:       corev1.SecretTypeOpaque,
+		StringData: map[string]string{"username": sftpUsername, "password": sftpPassword},
+	}
+	err = nonAdminClient.Create(testCtx, secret)
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		Expect(err).NotTo(HaveOccurred(), "Failed to create case management secret")
+	}
+}
+
+func waitForObfuscationMode1JobSuccess(name, namespace string) (*batchv1.Job, *corev1.Pod) {
+	job := &batchv1.Job{}
+	ginkgo.By("Waiting for Job to be created")
+	Eventually(func(g Gomega) {
+		mg := &mustgatherv1alpha1.MustGather{}
+		g.Expect(nonAdminClient.Get(testCtx, client.ObjectKey{Name: name, Namespace: namespace}, mg)).To(Succeed())
+		if mg.Status.Status == "Failed" {
+			ginkgo.Fail(fmt.Sprintf("MustGather validation failed before Job creation: %s", mg.Status.Reason))
+		}
+		g.Expect(nonAdminClient.Get(testCtx, client.ObjectKey{Name: name, Namespace: namespace}, job)).To(Succeed())
+	}).WithTimeout(2 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
+
+	var mustGatherPod *corev1.Pod
+	ginkgo.By("Waiting for Pod with gather and upload containers")
+	Eventually(func(g Gomega) {
+		podList := &corev1.PodList{}
+		g.Expect(nonAdminClient.List(testCtx, podList,
+			client.InNamespace(namespace),
+			client.MatchingLabels{jobNameLabelKey: name})).To(Succeed())
+		g.Expect(podList.Items).NotTo(BeEmpty())
+		mustGatherPod = &podList.Items[0]
+
+		containerNames := make(map[string]bool)
+		for _, c := range mustGatherPod.Spec.Containers {
+			containerNames[c.Name] = true
+		}
+		g.Expect(containerNames).To(HaveKey(gatherContainerName))
+		g.Expect(containerNames).To(HaveKey(uploadContainerName))
+		g.Expect(mustGatherPod.Status.Phase).To(
+			Or(Equal(corev1.PodRunning), Equal(corev1.PodSucceeded), Equal(corev1.PodFailed)))
+	}).WithTimeout(2 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
+
+	ginkgo.By("Waiting for Job to complete successfully")
+	Eventually(func() bool {
+		if err := nonAdminClient.Get(testCtx, client.ObjectKey{Name: name, Namespace: namespace}, job); err != nil {
+			return false
+		}
+		if job.Status.Succeeded > 0 {
+			return true
+		}
+		if job.Status.Failed > 0 {
+			failObfuscationJob(name, namespace, mustGatherPod)
+		}
+		return false
+	}).WithTimeout(5*time.Minute).WithPolling(10*time.Second).Should(BeTrue(),
+		"obfuscation Mode 1 Job should complete successfully")
+
+	return job, mustGatherPod
+}
+
+func failObfuscationJob(name, namespace string, mustGatherPod *corev1.Pod) {
+	job := &batchv1.Job{}
+	_ = nonAdminClient.Get(testCtx, client.ObjectKey{Name: name, Namespace: namespace}, job)
+	var details []string
+	for _, c := range job.Status.Conditions {
+		details = append(details, fmt.Sprintf("jobCondition[%s]=%s reason=%q message=%q",
+			c.Type, c.Status, c.Reason, c.Message))
+	}
+	if mustGatherPod != nil && mustGatherPod.Name != "" {
+		tmpPod := &corev1.Pod{}
+		if err := nonAdminClient.Get(testCtx, client.ObjectKey{Name: mustGatherPod.Name, Namespace: namespace}, tmpPod); err == nil {
+			for _, cs := range tmpPod.Status.ContainerStatuses {
+				if cs.State.Terminated != nil {
+					details = append(details, fmt.Sprintf("container[%s] exitCode=%d reason=%q message=%q",
+						cs.Name, cs.State.Terminated.ExitCode, cs.State.Terminated.Reason, cs.State.Terminated.Message))
+				}
+			}
+		}
+	}
+	ginkgo.Fail(fmt.Sprintf("obfuscation Job failed: %s", strings.Join(details, "; ")))
+}
+
+func assertJobHasGatherAndUploadContainers(job *batchv1.Job) {
+	names := make(map[string]bool)
+	for _, c := range job.Spec.Template.Spec.Containers {
+		names[c.Name] = true
+	}
+	Expect(names).To(HaveKey(gatherContainerName))
+	Expect(names).To(HaveKey(uploadContainerName))
+}
+
+func assertUploadContainerObfuscateEnabled(job *batchv1.Job, expectCustomConfig bool) {
+	var uploadContainer *corev1.Container
+	for i := range job.Spec.Template.Spec.Containers {
+		if job.Spec.Template.Spec.Containers[i].Name == uploadContainerName {
+			uploadContainer = &job.Spec.Template.Spec.Containers[i]
+			break
+		}
+	}
+	Expect(uploadContainer).NotTo(BeNil())
+
+	envVars := make(map[string]string)
+	for _, env := range uploadContainer.Env {
+		envVars[env.Name] = env.Value
+	}
+	Expect(envVars["obfuscate"]).To(Equal("true"), "upload container should have obfuscate=true")
+	if expectCustomConfig {
+		Expect(envVars).To(HaveKey("obfuscate_config"), "upload container should have obfuscate_config env var")
+		Expect(envVars["obfuscate_config"]).To(ContainSubstring("config.yaml"))
+	} else {
+		Expect(envVars).NotTo(HaveKey("obfuscate_config"), "default config should not set obfuscate_config env var")
+	}
+}
+
+func assertMustGatherCompleted(name, namespace string) {
+	fetchedMG := &mustgatherv1alpha1.MustGather{}
+	Eventually(func(g Gomega) {
+		g.Expect(nonAdminClient.Get(testCtx, client.ObjectKey{Name: name, Namespace: namespace}, fetchedMG)).To(Succeed())
+		g.Expect(fetchedMG.Status.Completed).To(BeTrue())
+		g.Expect(fetchedMG.Status.Status).To(Equal("Completed"))
+	}).WithTimeout(30*time.Second).WithPolling(2*time.Second).Should(Succeed())
+}
+
+func waitForObfuscationSourceJobSuccess(name, namespace string) (*batchv1.Job, *corev1.Pod) {
+	job := &batchv1.Job{}
+	ginkgo.By("Waiting for source-PVC obfuscation Job to be created")
+	Eventually(func(g Gomega) {
+		mg := &mustgatherv1alpha1.MustGather{}
+		g.Expect(nonAdminClient.Get(testCtx, client.ObjectKey{Name: name, Namespace: namespace}, mg)).To(Succeed())
+		if mg.Status.Status == "Failed" {
+			ginkgo.Fail(fmt.Sprintf("MustGather validation failed before Job creation: %s", mg.Status.Reason))
+		}
+		g.Expect(nonAdminClient.Get(testCtx, client.ObjectKey{Name: name, Namespace: namespace}, job)).To(Succeed())
+	}).WithTimeout(2 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
+
+	var mustGatherPod *corev1.Pod
+	ginkgo.By("Waiting for Pod with upload container only")
+	Eventually(func(g Gomega) {
+		podList := &corev1.PodList{}
+		g.Expect(nonAdminClient.List(testCtx, podList,
+			client.InNamespace(namespace),
+			client.MatchingLabels{jobNameLabelKey: name})).To(Succeed())
+		g.Expect(podList.Items).NotTo(BeEmpty())
+		mustGatherPod = &podList.Items[0]
+
+		containerNames := make(map[string]bool)
+		for _, c := range mustGatherPod.Spec.Containers {
+			containerNames[c.Name] = true
+		}
+		g.Expect(containerNames).NotTo(HaveKey(gatherContainerName), "source PVC mode should not have gather container")
+		g.Expect(containerNames).To(HaveKey(uploadContainerName))
+		g.Expect(mustGatherPod.Status.Phase).To(
+			Or(Equal(corev1.PodRunning), Equal(corev1.PodSucceeded), Equal(corev1.PodFailed)))
+	}).WithTimeout(2 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
+
+	ginkgo.By("Waiting for source-PVC obfuscation Job to complete successfully")
+	Eventually(func() bool {
+		if err := nonAdminClient.Get(testCtx, client.ObjectKey{Name: name, Namespace: namespace}, job); err != nil {
+			return false
+		}
+		if job.Status.Succeeded > 0 {
+			return true
+		}
+		if job.Status.Failed > 0 {
+			failObfuscationJob(name, namespace, mustGatherPod)
+		}
+		return false
+	}).WithTimeout(5*time.Minute).WithPolling(10*time.Second).Should(BeTrue(),
+		"source PVC obfuscation Job should complete successfully")
+
+	return job, mustGatherPod
+}
+
+func assertJobHasUploadContainerOnly(job *batchv1.Job) {
+	names := make([]string, 0, len(job.Spec.Template.Spec.Containers))
+	for _, c := range job.Spec.Template.Spec.Containers {
+		names = append(names, c.Name)
+	}
+	Expect(names).To(ConsistOf(uploadContainerName), "source PVC mode Job should have upload container only")
+}
+
+func assertUploadContainerNoSFTPCredentials(job *batchv1.Job) {
+	uploadContainer := getUploadContainerFromJob(job)
+	envNames := make(map[string]bool)
+	for _, env := range uploadContainer.Env {
+		envNames[env.Name] = true
+		if env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
+			ginkgo.Fail(fmt.Sprintf("obfuscate-only upload container should not reference SFTP secret env %q", env.Name))
+		}
+	}
+	for _, name := range []string{"caseid", "host", "internal_user", "username", "password"} {
+		Expect(envNames).NotTo(HaveKey(name), "obfuscate-only upload container should not have SFTP env %q", name)
+	}
+}
+
+func getUploadContainerFromJob(job *batchv1.Job) *corev1.Container {
+	for i := range job.Spec.Template.Spec.Containers {
+		if job.Spec.Template.Spec.Containers[i].Name == uploadContainerName {
+			return &job.Spec.Template.Spec.Containers[i]
+		}
+	}
+	Expect(job.Spec.Template.Spec.Containers).NotTo(BeEmpty(), "Job should have upload container")
+	return nil
+}
+
+func readObfuscationSourcePVC(namespace, pvcName, subPath string) string {
+	readerPodName := fmt.Sprintf("obf-source-read-%d", time.Now().UnixNano())
+	mount := corev1.VolumeMount{Name: "data", MountPath: "/must-gather"}
+	if subPath != "" {
+		mount.SubPath = subPath
+	}
+
+	readerPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: readerPodName, Namespace: namespace},
+		Spec: corev1.PodSpec{
+			RestartPolicy:      corev1.RestartPolicyNever,
+			ServiceAccountName: serviceAccount,
+			Containers: []corev1.Container{
+				{
+					Name:    "reader",
+					Image:   "busybox:1.36",
+					Command: []string{"/bin/sh", "-c", `echo PVC_INSPECT_START; cat /must-gather/hosts-a.txt; test -f /must-gather/secret.yaml && echo SECRET_PRESENT || echo SECRET_MISSING; echo PVC_INSPECT_END`},
+					VolumeMounts: []corev1.VolumeMount{mount},
+				},
+			},
+			Volumes: []corev1.Volume{
+				{
+					Name: "data",
+					VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: pvcName},
+					},
+				},
+			},
+		},
+	}
+
+	Expect(nonAdminClient.Create(testCtx, readerPod)).To(Succeed(), "Failed to create source PVC reader pod")
+	defer func() { _ = nonAdminClient.Delete(testCtx, readerPod) }()
+
+	Eventually(func() corev1.PodPhase {
+		current := &corev1.Pod{}
+		if err := nonAdminClient.Get(testCtx, client.ObjectKey{Name: readerPodName, Namespace: namespace}, current); err != nil {
+			return corev1.PodUnknown
+		}
+		return current.Status.Phase
+	}).WithTimeout(2*time.Minute).WithPolling(5*time.Second).Should(Equal(corev1.PodSucceeded))
+
+	logs, err := getContainerLogs(namespace, readerPodName, "reader")
+	Expect(err).NotTo(HaveOccurred(), "Failed to get source PVC reader pod logs")
+	return logs
+}
+
+func assertCleanedStagingInUploadPod(namespace, podName string) {
+	output, err := execInPodContainer(namespace, podName, uploadContainerName, `
+set -e
+test -f /must-gather-upload/cleaned/report.yaml
+grep -rq "x-ipv4-" /must-gather-upload/cleaned
+! grep -rq "10.0.0.5" /must-gather-upload/cleaned
+test ! -f /must-gather-upload/cleaned/secret.yaml
+echo CLEANED_OK
+`)
+	Expect(err).NotTo(HaveOccurred(), "Failed to inspect cleaned staging in upload pod")
+	Expect(output).To(ContainSubstring("CLEANED_OK"), "cleaned staging should contain obfuscated output and report.yaml")
+}
+
+func execInPodContainer(namespace, podName, container, command string) (string, error) {
+	cli, err := exec.LookPath("oc")
+	if err != nil {
+		cli, err = exec.LookPath("kubectl")
+		if err != nil {
+			return "", fmt.Errorf("oc/kubectl not found in PATH for pod exec")
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(testCtx, 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, cli, "exec", "-n", namespace, podName, "-c", container, "--", "/bin/sh", "-c", command)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(out), fmt.Errorf("%s exec failed: %w\noutput: %s", cli, err, string(out))
+	}
+	return string(out), nil
+}
+
+// verifyAndInspectObfuscatedSFTPUpload downloads the uploaded tarball and checks obfuscation markers.
+func verifyAndInspectObfuscatedSFTPUpload(
+	namespace, secretName, host, caseID string,
+	internalUser bool,
+	expect obfuscationBundleInspectExpectations,
+) (bool, string, error) {
+	verifyPodName := fmt.Sprintf("sftp-inspect-%d", time.Now().UnixNano())
+
+	sftpListPath := "."
+	if internalUser {
+		sftpListPath = "$SFTP_USERNAME"
+	}
+	sftpHost := host
+	if net.ParseIP(host) != nil && strings.Contains(host, ":") {
+		sftpHost = "[" + host + "]"
+	}
+
+	inspectChecks := `
+echo "INSPECT_START"
+TAR=$(ls ${caseID}_must-gather*.tar.gz 2>/dev/null | head -1)
+if [ -z "$TAR" ]; then echo "TAR_NOT_FOUND"; exit 0; fi
+echo "TAR_FILE=$TAR"
+mkdir -p /tmp/extract
+tar -xzf "$TAR" -C /tmp/extract
+if grep -rq "x-ipv4-" /tmp/extract; then echo "IPV4_TOKEN_FOUND"; else echo "IPV4_TOKEN_ABSENT"; fi
+if grep -rq "10.0.0.5" /tmp/extract; then echo "RAW_IP_FOUND"; else echo "RAW_IP_ABSENT"; fi
+if find /tmp/extract -name report.yaml | grep -q report.yaml; then echo "REPORT_FOUND"; else echo "REPORT_ABSENT"; fi
+if grep -rq "kind: Secret" /tmp/extract; then echo "SECRET_FOUND"; else echo "SECRET_OMITTED"; fi
+if grep -rq "aa:bb:cc:dd:ee:ff" /tmp/extract; then echo "MAC_PRESENT"; else echo "MAC_ABSENT"; fi
+echo "INSPECT_END"
+`
+	inspectChecks = strings.ReplaceAll(inspectChecks, "${caseID}", caseID)
+
+	sftpCommand := fmt.Sprintf(`
+		mkdir -p /tmp/sftp /tmp/.ssh
+		touch /tmp/.ssh/known_hosts
+		chmod 700 /tmp/.ssh
+		chmod 600 /tmp/.ssh/known_hosts
+		cd /tmp/sftp
+		SSH_CONFIG="/tmp/.ssh/config"
+		echo "Host *" > ${SSH_CONFIG}
+		echo "  BatchMode no" >> ${SSH_CONFIG}
+		echo "  StrictHostKeyChecking no" >> ${SSH_CONFIG}
+		echo "  UserKnownHostsFile /tmp/.ssh/known_hosts" >> ${SSH_CONFIG}
+		chmod 600 ${SSH_CONFIG}
+		sshpass -e sftp -F ${SSH_CONFIG} $SFTP_USERNAME@%s << EOF
+cd %s
+get %s_must-gather*.tar.gz
+bye
+EOF
+%s
+	`, sftpHost, sftpListPath, caseID, inspectChecks)
+
+	httpProxy, httpsProxy, noProxy, _ := getOperatorProxyEnvVars()
+	verifyPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: verifyPodName, Namespace: namespace},
+		Spec: corev1.PodSpec{
+			RestartPolicy:      corev1.RestartPolicyNever,
+			ServiceAccountName: serviceAccount,
+			SecurityContext: &corev1.PodSecurityContext{
+				RunAsNonRoot: func() *bool { b := true; return &b }(),
+				SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+			},
+			Containers: []corev1.Container{
+				{
+					Name:    "sftp-inspect",
+					Image:   operatorImage,
+					Command: []string{"/bin/bash", "-c", sftpCommand},
+					SecurityContext: &corev1.SecurityContext{
+						AllowPrivilegeEscalation: func() *bool { b := false; return &b }(),
+						Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+						RunAsNonRoot:             func() *bool { b := true; return &b }(),
+					},
+					Env: buildVerifyPodEnvVars(secretName, httpProxy, httpsProxy, noProxy),
+				},
+			},
+		},
+	}
+
+	if err := nonAdminClient.Create(testCtx, verifyPod); err != nil {
+		return false, "", fmt.Errorf("failed to create inspection pod: %w", err)
+	}
+	defer func() { _ = nonAdminClient.Delete(testCtx, verifyPod) }()
+
+	Eventually(func() corev1.PodPhase {
+		pod := &corev1.Pod{}
+		if err := nonAdminClient.Get(testCtx, client.ObjectKey{Name: verifyPodName, Namespace: namespace}, pod); err != nil {
+			return corev1.PodUnknown
+		}
+		return pod.Status.Phase
+	}).WithTimeout(3*time.Minute).WithPolling(5*time.Second).Should(
+		Or(Equal(corev1.PodSucceeded), Equal(corev1.PodFailed)),
+		"inspection pod should complete")
+
+	logs, err := getContainerLogs(namespace, verifyPodName, "sftp-inspect")
+	if err != nil {
+		return false, "", fmt.Errorf("failed to get inspection pod logs: %w", err)
+	}
+
+	found := strings.Contains(logs, fmt.Sprintf("TAR_FILE=%s_must-gather", caseID)) && !strings.Contains(logs, "TAR_NOT_FOUND")
+	if !found {
+		return false, logs, nil
+	}
+
+	if expect.expectObfuscatedIP {
+		Expect(logs).To(ContainSubstring("IPV4_TOKEN_FOUND"), "uploaded bundle should contain obfuscated IP tokens")
+	}
+	if expect.expectRawIPAbsent {
+		Expect(logs).To(ContainSubstring("RAW_IP_ABSENT"), "uploaded bundle should not contain raw sample IP")
+	}
+	if expect.expectSecretOmitted {
+		Expect(logs).To(ContainSubstring("SECRET_OMITTED"), "uploaded bundle should omit Secret YAML with default config")
+	}
+	if expect.expectMACPreserved {
+		Expect(logs).To(ContainSubstring("MAC_PRESENT"), "uploaded bundle should preserve MAC with IP-only custom config")
+	}
+	if expect.expectReportYAML {
+		Expect(logs).To(ContainSubstring("REPORT_FOUND"), "uploaded bundle should include report.yaml audit artifact")
+	}
+
+	return true, logs, nil
+}
+
+// assertUploadLogsContainObfuscation verifies upload container logs include obfuscation markers.
+func assertUploadLogsContainObfuscation(namespace, podName string) {
+	logs, err := getContainerLogs(namespace, podName, uploadContainerName)
+	Expect(err).NotTo(HaveOccurred(), "Failed to get upload container logs")
+	Expect(logs).To(ContainSubstring(obfuscationLogRunning), "upload logs should mention obfuscation start")
+	Expect(logs).To(ContainSubstring(obfuscationLogComplete), "upload logs should mention obfuscation completion")
+}
+
+// assertUploadLogsDoNotContainObfuscation verifies legacy upload logs omit obfuscation markers.
+func assertUploadLogsDoNotContainObfuscation(namespace, podName string) {
+	logs, err := getContainerLogs(namespace, podName, uploadContainerName)
+	Expect(err).NotTo(HaveOccurred(), "Failed to get upload container logs")
+	Expect(logs).NotTo(ContainSubstring(obfuscationLogRunning), "legacy upload logs should not mention obfuscation start")
+	Expect(logs).NotTo(ContainSubstring(obfuscationLogComplete), "legacy upload logs should not mention obfuscation completion")
+}
+
+func assertUploadContainerObfuscateDisabled(job *batchv1.Job) {
+	uploadContainer := getUploadContainerFromJob(job)
+	for _, env := range uploadContainer.Env {
+		if env.Name == "obfuscate" {
+			Expect(env.Value).NotTo(Equal("true"), "legacy upload container should not enable obfuscation")
+			return
+		}
+	}
+}
+
+// assertBundleContainsObfuscatedIP walks a directory and verifies IPs were replaced consistently.
+func assertBundleContainsObfuscatedIP(bundleDir string) {
+	var tokens []string
+	err := filepath.WalkDir(bundleDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		text := string(content)
+		Expect(text).NotTo(ContainSubstring(sampleBundleIP), "raw sample IP should be obfuscated in %s", path)
+		if token := obfuscatedIPRegexp.FindString(text); token != "" {
+			tokens = append(tokens, token)
+		}
+		return nil
+	})
+	Expect(err).NotTo(HaveOccurred(), "Failed to walk bundle directory %s", bundleDir)
+	Expect(tokens).NotTo(BeEmpty(), "expected obfuscated IP tokens in bundle under %s", bundleDir)
+	if len(tokens) > 1 {
+		Expect(tokens[0]).To(Equal(tokens[1]), "expected consistent IP token across bundle files")
+	}
+}
+
+// assertReportYAMLPresent verifies the obfuscation audit artifact exists in output.
+func assertReportYAMLPresent(outputDir string) {
+	reportPath := filepath.Join(outputDir, "report.yaml")
+	_, err := os.Stat(reportPath)
+	Expect(err).NotTo(HaveOccurred(), "expected report.yaml in %s", outputDir)
+}
+
+// seedPVCWithSampleBundle copies embedded sample bundle files onto a PVC via a short-lived pod.
+func seedPVCWithSampleBundle(namespace, pvcName, subPath string) {
+	ginkgo.By(fmt.Sprintf("Seeding PVC %s with sample must-gather bundle", pvcName))
+
+	targetDir := "/data"
+	if subPath != "" {
+		targetDir = filepath.Join("/data", subPath)
+	}
+
+	var script strings.Builder
+	script.WriteString(fmt.Sprintf("mkdir -p %q\n", targetDir))
+	bundlePath := filepath.Join("testdata", bundleSampleDir)
+	entries, err := testassets.ReadDir(bundlePath)
+	Expect(err).NotTo(HaveOccurred(), "Failed to read embedded bundle sample directory")
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		content, readErr := testassets.ReadFile(filepath.Join(bundlePath, entry.Name()))
+		Expect(readErr).NotTo(HaveOccurred(), "Failed to read embedded bundle file %s", entry.Name())
+		script.WriteString(fmt.Sprintf("cat > %q <<'EOFBUNDLE'\n%sEOFBUNDLE\n", filepath.Join(targetDir, entry.Name()), string(content)))
+	}
+
+	podName := fmt.Sprintf("seed-bundle-%d", time.Now().UnixNano())
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: namespace,
+		},
+		Spec: corev1.PodSpec{
+			RestartPolicy: corev1.RestartPolicyNever,
+			Containers: []corev1.Container{
+				{
+					Name:    "seed",
+					Image:   "busybox:1.36",
+					Command: []string{"/bin/sh", "-c", script.String()},
+					VolumeMounts: []corev1.VolumeMount{
+						{
+							Name:      "data",
+							MountPath: "/data",
+						},
+					},
+				},
+			},
+			Volumes: []corev1.Volume{
+				{
+					Name: "data",
+					VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+							ClaimName: pvcName,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	Expect(nonAdminClient.Create(testCtx, pod)).To(Succeed(), "Failed to create PVC seed pod")
+	defer func() {
+		_ = nonAdminClient.Delete(testCtx, pod)
+	}()
+
+	Eventually(func() corev1.PodPhase {
+		current := &corev1.Pod{}
+		err := nonAdminClient.Get(testCtx, client.ObjectKey{Name: podName, Namespace: namespace}, current)
+		if err != nil {
+			return corev1.PodUnknown
+		}
+		return current.Status.Phase
+	}).WithTimeout(2*time.Minute).WithPolling(5*time.Second).Should(Equal(corev1.PodSucceeded))
 }

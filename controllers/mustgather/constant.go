@@ -25,4 +25,17 @@ const (
 
 	// podNameEnvVar is the environment variable name for the current pod's name
 	podNameEnvVar = "POD_NAME"
+
+	// Obfuscation env vars consumed by build/bin/upload (ep.md § upload script contract).
+	obfuscateEnvEnabled = "obfuscate"
+	obfuscateEnvConfig  = "obfuscate_config"
+
+	// Obfuscation custom ConfigMap volume/mount paths (ep.md § Job template).
+	obfuscateConfigVolumeName = "obfuscate-config"
+	obfuscateConfigMountDir   = "/etc/must-gather-clean/custom-config"
+	obfuscateConfigMountPath  = "/etc/must-gather-clean/custom-config/config.yaml"
+	obfuscateConfigMapKey     = "config.yaml"
+
+	// obfuscateChownSuffix transfers gather output ownership to the upload container UID (65534).
+	obfuscateChownSuffix = "chown -R 65534:65534 /must-gather"
 )

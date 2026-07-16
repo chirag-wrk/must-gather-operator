@@ -174,6 +174,19 @@ github.com/openshift/api/image/docker10
 github.com/openshift/api/image/dockerpre012
 github.com/openshift/api/image/v1
 github.com/openshift/api/route/v1
+# github.com/openshift/must-gather-clean v0.0.5
+## explicit; go 1.21
+github.com/openshift/must-gather-clean/pkg/cleaner
+github.com/openshift/must-gather-clean/pkg/cli
+github.com/openshift/must-gather-clean/pkg/fsutil
+github.com/openshift/must-gather-clean/pkg/kube
+github.com/openshift/must-gather-clean/pkg/obfuscator
+github.com/openshift/must-gather-clean/pkg/omitter
+github.com/openshift/must-gather-clean/pkg/reporting
+github.com/openshift/must-gather-clean/pkg/schema
+github.com/openshift/must-gather-clean/pkg/traversal
+github.com/openshift/must-gather-clean/pkg/version
+github.com/openshift/must-gather-clean/pkg/watermarker
 # github.com/openshift/operator-custom-metrics v0.5.0
 ## explicit; go 1.17
 github.com/openshift/operator-custom-metrics/pkg/metrics
@@ -252,6 +265,12 @@ go.starlark.net/resolve
 go.starlark.net/starlark
 go.starlark.net/starlarkstruct
 go.starlark.net/syntax
+# go.uber.org/automaxprocs v1.6.0
+## explicit; go 1.20
+go.uber.org/automaxprocs
+go.uber.org/automaxprocs/internal/cgroups
+go.uber.org/automaxprocs/internal/runtime
+go.uber.org/automaxprocs/maxprocs
 # go.uber.org/multierr v1.11.0
 ## explicit; go 1.19
 go.uber.org/multierr
@@ -819,7 +838,7 @@ k8s.io/kube-openapi/pkg/validation/spec
 ## explicit; go 1.20
 k8s.io/kubectl/pkg/util/openapi
 k8s.io/kubectl/pkg/validation
-# k8s.io/utils v0.0.0-20241104100929-3ea5e8cea738
+# k8s.io/utils v0.0.0-20250820121507-0af2bda4dd1d
 ## explicit; go 1.18
 k8s.io/utils/buffer
 k8s.io/utils/clock
@@ -829,6 +848,7 @@ k8s.io/utils/lru
 k8s.io/utils/net
 k8s.io/utils/pointer
 k8s.io/utils/ptr
+k8s.io/utils/set
 k8s.io/utils/trace
 # sigs.k8s.io/controller-runtime v0.21.0
 ## explicit; go 1.24.0
