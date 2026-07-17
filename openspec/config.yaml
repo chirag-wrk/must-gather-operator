@@ -1,0 +1,77 @@
+schema: openspec-bugfix-workflow
+
+context: |
+  GS Spec Kit bug fix workflow — gated bug-fix-driven development.
+  Stages: bug-validation → bug-report → repro-verification → rca-report → bugfix-plan → tasks → implementation.
+  Primary input at /opsx:new: Jira Bug ticket key ONLY (stored in inputs/jira.yaml).
+  Target GitHub repository: NOT required at /opsx:new — required before repro verification
+  (unless working-folder mode — see schema working_folder_repo).
+  Optional anytime: AGENTS.md from the target repo.
+  Working-folder mode: when the user directs using the current checkout as the repo,
+  set use_working_folder_as_repo: true in inputs/jira.yaml — skip fork URL and draft PR.
+  Working-folder git scope: analyze only HEAD and ancestor commits — never futuristic
+  SHAs ahead of HEAD (schema working_folder_repo.git_history_scope).
+  Fork URL: NOT required until Implementation (/opsx:apply) in default mode — stored as
+  fork_repo_url in inputs/jira.yaml.
+  Approve each artifact before proceeding to the next stage. Implementation uses
+  task-by-task execution with per-task user approval (/opsx-apply), then pushes a
+  draft PR to the user's fork.
+
+flags:
+  # codegen_mode controls the implementation phase strategy:
+  #   "ai-helpers" — OAPE command routing + code-generation eval gate (design-bundle per task,
+  #                  specialized Cursor commands for API/controller/e2e generation, eval scoring)
+  #   "direct"     — plain agent implementation (reads context files, applies FILE OPERATIONS
+  #                  directly, no OAPE commands, no code eval gate)
+  codegen_mode: ai-helpers
+  max_feedback_rounds: 3
+  exit_on_all_tasks_complete: true
+  generate_evaluation_reports: true
+  task_sizing:
+    prompt_user: true
+    default_min: 2
+    default_max: 8
+    consolidation_threshold: 2
+
+rules:
+  bug-validation:
+    - "Read jira_key from inputs/jira.yaml; use inputs/jira-bug.md as bug report source"
+    - "Obtain Jira Bug ticket content via Jira MCP or ask the user to paste into inputs/jira-bug.md"
+    - "Score completeness (60%) and quality (40%); do not invent bug behaviors"
+    - "Emit bug-validation.json matching the bug-validation-template.md schema"
+  bug-report:
+    - "Derive from the same Jira Bug ticket referenced in inputs/jira.yaml"
+    - "Extract ARD from linked Epic development PRs"
+    - "Ingest PR diffs for downstream RCA comparison"
+    - "If user rejects bug-report.md at approval, exit the workflow (no refinement loop)"
+    - "Working-folder mode: do not cite post-HEAD fix commits as authoritative prior art (schema working_folder_repo.git_history_scope)"
+  repro-verification:
+    - "Before creating repro-verification-report.md, ensure target_repo is set OR working-folder mode is active"
+    - "Execute reproduction steps from bug-report.md; capture logs and failure signature"
+    - "Confirm bug is reproducible before proceeding to RCA"
+    - "Working-folder mode: baseline is git HEAD only; cite only ancestor commits (schema working_folder_repo.git_history_scope)"
+  rca:
+    - "Trace failure path from symptom to root cause using repro logs"
+    - "Compare actual behavior vs ARD intent from original PRs"
+    - "Identify root cause (not symptom); map affected components"
+    - "Working-folder mode: do not use futuristic commits (not reachable from HEAD) as prior art or fix recipes"
+  constitution:
+    - "INPUT not artifact — resolve via lookup order (target repo, then change inputs/, then schema inputs/)"
+    - "If not found, generate once using templates/constitution-template.md and save to change inputs/"
+  bugfix-plan:
+    - "Single-phase fix plan; minimal blast radius; regression test strategy; rollback plan"
+    - "Every file must trace to rca-report.md or verified code inspection"
+    - "Working-folder mode: design the fix from HEAD code; do not copy unreachable post-HEAD SHAs unless the user explicitly directs"
+  tasks:
+    - "Use §0–§5 structure; single-phase for bug fixes (no multi-phase)"
+    - "Task types: Code Fix, Regression Test, Verification"
+    - "Unit tests are co-generated per task (not separate tasks)"
+  implementation:
+    - "Follow the implementation artifact instruction in schema.yaml exactly"
+    - "Working-folder mode: use project cwd; no fork, no draft PR (schema working_folder_repo)"
+    - "Working-folder mode: implement against HEAD tree only; do not pull fix recipes from post-HEAD commits"
+    - "Default mode: Ask user for fork_repo_url at stage start; persist to inputs/jira.yaml"
+    - "Task-by-task execution with per-task user approval gate"
+    - "Every bug fix task must co-generate regression tests"
+    - "After all tasks: commit, push fix branch, open draft PR on fork"
+    - "Close with implementation-report.md, optional deviation-observed.md"

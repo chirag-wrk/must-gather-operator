@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 
 	"time"
 
@@ -47,7 +48,33 @@ const (
 	// SSH directory and known hosts file
 	sshDir         = "/tmp/must-gather-operator/.ssh"
 	knownHostsFile = "/tmp/must-gather-operator/.ssh/known_hosts"
+
+	jobRunIDTimestampFormat = "20060102_150405Z"
+	defaultPVCSubPathBase   = "must-gather"
 )
+
+// jobRunID returns a unique identifier for the current Job run. Tests may replace this function.
+var jobRunID = func() string {
+	return time.Now().UTC().Format(jobRunIDTimestampFormat)
+}
+
+func resolvePVCSubPath(baseSubPath, runID string) string {
+	if runID == "" {
+		return ""
+	}
+	base := strings.Trim(baseSubPath, "/")
+	if base == "" {
+		return fmt.Sprintf("%s/%s", defaultPVCSubPathBase, runID)
+	}
+	return fmt.Sprintf("%s/%s", base, runID)
+}
+
+func pvcEffectiveSubPath(storage *v1alpha1.Storage) string {
+	if storage == nil || storage.Type != v1alpha1.StorageTypePersistentVolume {
+		return ""
+	}
+	return resolvePVCSubPath(storage.PersistentVolume.SubPath, jobRunID())
+}
 
 func getJobTemplate(image string, operatorImage string, mustGather v1alpha1.MustGather, trustedCAConfigMapName string) *batchv1.Job {
 	job := initializeJobTemplate(mustGather.Name, mustGather.Namespace, mustGather.Spec.ServiceAccountName, mustGather.Spec.Storage, trustedCAConfigMapName)
@@ -84,9 +111,11 @@ func getJobTemplate(image string, operatorImage string, mustGather v1alpha1.Must
 		args = mustGather.Spec.GatherSpec.Args
 	}
 
+	pvcSubPath := pvcEffectiveSubPath(mustGather.Spec.Storage)
+
 	job.Spec.Template.Spec.Containers = append(
 		job.Spec.Template.Spec.Containers,
-		getGatherContainer(image, audit, timeout, mustGather.Spec.Storage, trustedCAConfigMapName, command, args),
+		getGatherContainer(image, audit, timeout, pvcSubPath, trustedCAConfigMapName, command, args),
 	)
 
 	// Add the upload container only if the upload target is specified
@@ -105,6 +134,7 @@ func getJobTemplate(image string, operatorImage string, mustGather v1alpha1.Must
 					noProxy,
 					s.CaseManagementAccountSecretRef,
 					trustedCAConfigMapName != "",
+					pvcSubPath,
 				),
 			)
 		}
@@ -192,7 +222,7 @@ func initializeJobTemplate(name string, namespace string, serviceAccountRef stri
 	}
 }
 
-func getGatherContainer(image string, audit bool, timeout time.Duration, storage *v1alpha1.Storage, trustedCAConfigMapName string, command []string, args []string) corev1.Container {
+func getGatherContainer(image string, audit bool, timeout time.Duration, pvcSubPath string, trustedCAConfigMapName string, command []string, args []string) corev1.Container {
 	var commandBinary string
 	if audit {
 		commandBinary = gatherCommandBinaryAudit
@@ -205,8 +235,8 @@ func getGatherContainer(image string, audit bool, timeout time.Duration, storage
 		Name:      outputVolumeName,
 	}
 
-	if storage != nil && storage.Type == v1alpha1.StorageTypePersistentVolume && storage.PersistentVolume.SubPath != "" {
-		volumeMount.SubPath = storage.PersistentVolume.SubPath
+	if pvcSubPath != "" {
+		volumeMount.SubPath = pvcSubPath
 	}
 
 	volumeMounts := []corev1.VolumeMount{volumeMount}
@@ -253,16 +283,22 @@ func getUploadContainer(
 	noProxy string,
 	secretKeyRefName corev1.LocalObjectReference,
 	shouldMountTrustedCAConfigMap bool,
+	pvcSubPath string,
 ) corev1.Container {
 	// Create the modified upload command that includes SSH setup
 	uploadCommandWithSSH := fmt.Sprintf("mkdir -p %s; touch %s; chmod 700 %s; chmod 600 %s; %s",
 		sshDir, knownHostsFile, sshDir, knownHostsFile, uploadCommand)
 
+	outputVolumeMount := corev1.VolumeMount{
+		MountPath: volumeMountPath,
+		Name:      outputVolumeName,
+	}
+	if pvcSubPath != "" {
+		outputVolumeMount.SubPath = pvcSubPath
+	}
+
 	volumeMounts := []corev1.VolumeMount{
-		{
-			MountPath: volumeMountPath,
-			Name:      outputVolumeName,
-		},
+		outputVolumeMount,
 		{
 			MountPath: volumeUploadMountPath,
 			Name:      uploadVolumeName,

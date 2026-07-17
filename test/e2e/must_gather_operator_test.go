@@ -13,6 +13,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -83,6 +84,8 @@ const (
 
 	// PersistentVolume test constants
 	mustGatherPVCName        = "must-gather-pvc"
+	ocpbugs64626SentinelFile = "keenon.log"
+	pvcRunIDPattern          = `\d{8}_\d{6}Z`
 	caseCredsConfigDirEnvVar = "CASE_MANAGEMENT_CREDS_CONFIG_DIR"
 	vaultUsernameKey         = "sftp-username-e2e"
 	vaultPasswordKey         = "sftp-password-e2e"
@@ -1473,7 +1476,104 @@ var _ = ginkgo.Describe("MustGather resource", ginkgo.Ordered, func() {
 				}
 			}
 			Expect(outputMount).NotTo(BeNil(), "Gather container should have output volume mount")
-			Expect(outputMount.SubPath).To(Equal(subPath), "Volume mount should have subPath configured")
+			Expect(outputMount.SubPath).To(HavePrefix(subPath+"/"),
+				"Volume mount SubPath should be base prefix with per-run suffix")
+			Expect(outputMount.SubPath).To(MatchRegexp(fmt.Sprintf(`^%s/%s$`, regexp.QuoteMeta(subPath), pvcRunIDPattern)),
+				"Volume mount SubPath should match base/runID pattern")
+
+			ginkgo.By("Verifying upload container shares the same computed SubPath when present")
+			var uploadContainer *corev1.Container
+			for i := range job.Spec.Template.Spec.Containers {
+				if job.Spec.Template.Spec.Containers[i].Name == uploadContainerName {
+					uploadContainer = &job.Spec.Template.Spec.Containers[i]
+					break
+				}
+			}
+			if uploadContainer != nil {
+				var uploadMount *corev1.VolumeMount
+				for i := range uploadContainer.VolumeMounts {
+					if uploadContainer.VolumeMounts[i].Name == outputVolumeName {
+						uploadMount = &uploadContainer.VolumeMounts[i]
+						break
+					}
+				}
+				Expect(uploadMount).NotTo(BeNil(), "Upload container should have output volume mount")
+				Expect(uploadMount.SubPath).To(Equal(outputMount.SubPath),
+					"Gather and upload containers should share identical computed SubPath")
+			}
+		})
+
+		ginkgo.It("should isolate PVC content across MustGather CR delete and recreate (OCPBUGS-64626)", func() {
+			subPath := "must-gather-data"
+			sentinelFile := ocpbugs64626SentinelFile
+
+			ginkgo.By("Creating MustGather CR with PVC storage and base SubPath")
+			mustGatherCR = createMustGatherCR(mustGatherName, ns.Name, serviceAccount, true, &MustGatherCROptions{
+				PersistentVolume: &PersistentVolumeOptions{PVCName: mustGatherPVCName, SubPath: subPath},
+			})
+
+			ginkgo.By("Waiting for first Job to complete")
+			firstJob := waitForMustGatherJobCompletion(mustGatherName)
+			firstRunSubPath := getContainerOutputSubPath(firstJob, gatherContainerName)
+			Expect(firstRunSubPath).To(MatchRegexp(fmt.Sprintf(`^%s/%s$`, regexp.QuoteMeta(subPath), pvcRunIDPattern)),
+				"First run should mount a uniquified SubPath under the base prefix")
+
+			ginkgo.By("Seeding sentinel file in first run-specific PVC subdirectory")
+			seedPodName := fmt.Sprintf("pvc-seed-%d", time.Now().UnixNano())
+			seedScript := fmt.Sprintf(`touch /must-gather/%s && ls -la /must-gather`, sentinelFile)
+			err := nonAdminClient.Create(testCtx, createPVCInspectPod(seedPodName, firstRunSubPath, seedScript))
+			Expect(err).NotTo(HaveOccurred(), "Failed to create sentinel seed pod")
+			waitForPodCompletion(seedPodName)
+			_ = nonAdminClient.Delete(testCtx, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: seedPodName, Namespace: ns.Name}})
+
+			ginkgo.By("Deleting MustGather CR to simulate recreate workflow")
+			err = nonAdminClient.Delete(testCtx, mustGatherCR)
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(func() bool {
+				err := nonAdminClient.Get(testCtx, client.ObjectKey{
+					Name:      mustGatherName,
+					Namespace: ns.Name,
+				}, &mustgatherv1alpha1.MustGather{})
+				return apierrors.IsNotFound(err)
+			}).WithTimeout(2*time.Minute).WithPolling(5*time.Second).Should(BeTrue(),
+				"MustGather CR should be deleted before recreate")
+
+			ginkgo.By("Recreating MustGather CR with the same PVC base SubPath")
+			mustGatherCR = createMustGatherCR(mustGatherName, ns.Name, serviceAccount, true, &MustGatherCROptions{
+				PersistentVolume: &PersistentVolumeOptions{PVCName: mustGatherPVCName, SubPath: subPath},
+			})
+
+			ginkgo.By("Waiting for second Job to complete")
+			secondJob := waitForMustGatherJobCompletion(mustGatherName)
+			secondRunSubPath := getContainerOutputSubPath(secondJob, gatherContainerName)
+			Expect(secondRunSubPath).To(MatchRegexp(fmt.Sprintf(`^%s/%s$`, regexp.QuoteMeta(subPath), pvcRunIDPattern)),
+				"Second run should mount a uniquified SubPath under the base prefix")
+			Expect(secondRunSubPath).NotTo(Equal(firstRunSubPath),
+				"Recreate with same base SubPath must allocate a fresh per-run subdirectory")
+
+			ginkgo.By("Verifying sentinel file is absent from the second run directory")
+			verifyAbsentPodName := fmt.Sprintf("pvc-verify-absent-%d", time.Now().UnixNano())
+			absentScript := fmt.Sprintf(`if [ -f /must-gather/%s ]; then echo "SENTINEL_FOUND"; exit 1; else echo "SENTINEL_ABSENT"; fi`, sentinelFile)
+			err = nonAdminClient.Create(testCtx, createPVCInspectPod(verifyAbsentPodName, secondRunSubPath, absentScript))
+			Expect(err).NotTo(HaveOccurred(), "Failed to create sentinel absence verification pod")
+			waitForPodCompletion(verifyAbsentPodName)
+			absentLogs, err := getContainerLogs(ns.Name, verifyAbsentPodName, "pvc-inspect")
+			Expect(err).NotTo(HaveOccurred(), "Failed to get absence verification pod logs")
+			Expect(absentLogs).To(ContainSubstring("SENTINEL_ABSENT"),
+				"Stale sentinel from first run must not appear in second run SubPath (OCPBUGS-64626)")
+			_ = nonAdminClient.Delete(testCtx, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: verifyAbsentPodName, Namespace: ns.Name}})
+
+			ginkgo.By("Verifying sentinel file still exists in the first run directory")
+			verifyPresentPodName := fmt.Sprintf("pvc-verify-present-%d", time.Now().UnixNano())
+			presentScript := fmt.Sprintf(`if [ -f /must-gather/%s ]; then echo "SENTINEL_PRESENT"; else echo "SENTINEL_MISSING"; exit 1; fi`, sentinelFile)
+			err = nonAdminClient.Create(testCtx, createPVCInspectPod(verifyPresentPodName, firstRunSubPath, presentScript))
+			Expect(err).NotTo(HaveOccurred(), "Failed to create sentinel presence verification pod")
+			waitForPodCompletion(verifyPresentPodName)
+			presentLogs, err := getContainerLogs(ns.Name, verifyPresentPodName, "pvc-inspect")
+			Expect(err).NotTo(HaveOccurred(), "Failed to get presence verification pod logs")
+			Expect(presentLogs).To(ContainSubstring("SENTINEL_PRESENT"),
+				"Sentinel should remain in the first run SubPath, proving PVC persistence without cross-run contamination")
+			_ = nonAdminClient.Delete(testCtx, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: verifyPresentPodName, Namespace: ns.Name}})
 		})
 
 		ginkgo.It("should create MustGather with PVC storage, configure Job correctly, and persist data", func() {
@@ -1721,6 +1821,106 @@ func createMustGatherCR(name, namespace, serviceAccountName string, retainResour
 
 	return mg
 }
+
+func waitForMustGatherJobCompletion(jobName string) *batchv1.Job {
+	job := &batchv1.Job{}
+	Eventually(func(g Gomega) {
+		g.Expect(nonAdminClient.Get(testCtx, client.ObjectKey{
+			Name:      jobName,
+			Namespace: ns.Name,
+		}, job)).To(Succeed(), "Job should exist")
+		g.Expect(job.Status.Succeeded).To(BeNumerically(">=", 1), "Job should complete successfully")
+	}).WithTimeout(5*time.Minute).WithPolling(5*time.Second).Should(Succeed(),
+		"MustGather Job should complete successfully")
+	return job
+}
+
+func getContainerOutputSubPath(job *batchv1.Job, containerName string) string {
+	for i := range job.Spec.Template.Spec.Containers {
+		if job.Spec.Template.Spec.Containers[i].Name != containerName {
+			continue
+		}
+		for j := range job.Spec.Template.Spec.Containers[i].VolumeMounts {
+			if job.Spec.Template.Spec.Containers[i].VolumeMounts[j].Name == outputVolumeName {
+				return job.Spec.Template.Spec.Containers[i].VolumeMounts[j].SubPath
+			}
+		}
+	}
+	return ""
+}
+
+func createPVCInspectPod(podName, pvcSubPath, script string) *corev1.Pod {
+	volumeMount := corev1.VolumeMount{
+		Name:      "pvc-data",
+		MountPath: "/must-gather",
+	}
+	if pvcSubPath != "" {
+		volumeMount.SubPath = pvcSubPath
+	}
+
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: ns.Name,
+		},
+		Spec: corev1.PodSpec{
+			RestartPolicy:      corev1.RestartPolicyNever,
+			ServiceAccountName: serviceAccount,
+			SecurityContext: &corev1.PodSecurityContext{
+				RunAsNonRoot: func() *bool { b := true; return &b }(),
+				SeccompProfile: &corev1.SeccompProfile{
+					Type: corev1.SeccompProfileTypeRuntimeDefault,
+				},
+			},
+			Containers: []corev1.Container{
+				{
+					Name:    "pvc-inspect",
+					Image:   operatorImage,
+					Command: []string{"/bin/sh", "-c", script},
+					SecurityContext: &corev1.SecurityContext{
+						AllowPrivilegeEscalation: func() *bool { b := false; return &b }(),
+						Capabilities: &corev1.Capabilities{
+							Drop: []corev1.Capability{"ALL"},
+						},
+						RunAsNonRoot: func() *bool { b := true; return &b }(),
+					},
+					VolumeMounts: []corev1.VolumeMount{volumeMount},
+				},
+			},
+			Volumes: []corev1.Volume{
+				{
+					Name: "pvc-data",
+					VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+							ClaimName: mustGatherPVCName,
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func waitForPodCompletion(podName string) {
+	pod := &corev1.Pod{}
+	Eventually(func(g Gomega) {
+		g.Expect(nonAdminClient.Get(testCtx, client.ObjectKey{
+			Name:      podName,
+			Namespace: ns.Name,
+		}, pod)).To(Succeed())
+		g.Expect(pod.Status.Phase).To(
+			Or(Equal(corev1.PodSucceeded), Equal(corev1.PodFailed)),
+			"PVC inspect pod should complete")
+		if pod.Status.Phase == corev1.PodFailed {
+			logs, err := getContainerLogs(ns.Name, podName, "pvc-inspect")
+			if err == nil {
+				ginkgo.GinkgoWriter.Printf("PVC inspect pod failed. Logs:\n%s\n", logs)
+			}
+			g.Expect(pod.Status.Phase).To(Equal(corev1.PodSucceeded), "PVC inspect pod should succeed")
+		}
+	}).WithTimeout(2*time.Minute).WithPolling(5*time.Second).Should(Succeed())
+}
+
 func getCaseCredsFromVault() (string, string, error) {
 	// First, try to read from Vault-mounted files (CI/CD environment)
 	configDir := os.Getenv(caseCredsConfigDirEnvVar)

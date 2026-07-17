@@ -10,6 +10,7 @@ import (
 
 	mustgatherv1alpha1 "github.com/openshift/must-gather-operator/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -19,6 +20,153 @@ const (
 	// canonical to `outputVolumeName`, de-coupled for test.
 	knownStorageVolumeMountNameForTest = "must-gather-output"
 )
+
+func Test_resolvePVCSubPath(t *testing.T) {
+	tests := []struct {
+		name         string
+		baseSubPath  string
+		runID        string
+		wantSubPath  string
+	}{
+		{
+			name:        "non-empty base",
+			baseSubPath: "test-path",
+			runID:       "20260101_120000Z",
+			wantSubPath: "test-path/20260101_120000Z",
+		},
+		{
+			name:        "empty base",
+			baseSubPath: "",
+			runID:       "20260101_120000Z",
+			wantSubPath: "must-gather/20260101_120000Z",
+		},
+		{
+			name:        "trimmed base slashes",
+			baseSubPath: "/test-path/",
+			runID:       "20260101_120000Z",
+			wantSubPath: "test-path/20260101_120000Z",
+		},
+		{
+			name:        "empty runID",
+			baseSubPath: "test-path",
+			runID:       "",
+			wantSubPath: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolvePVCSubPath(tt.baseSubPath, tt.runID); got != tt.wantSubPath {
+				t.Fatalf("resolvePVCSubPath() = %q, want %q", got, tt.wantSubPath)
+			}
+		})
+	}
+}
+
+func Test_getJobTemplate_PVCSubPath(t *testing.T) {
+	originalJobRunID := jobRunID
+	defer func() { jobRunID = originalJobRunID }()
+
+	baseSubPath := "test-path"
+	runID := "20260101_120000Z"
+	jobRunID = func() string { return runID }
+
+	mustGather := mustgatherv1alpha1.MustGather{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-mg",
+			Namespace: "test-ns",
+		},
+		Spec: mustgatherv1alpha1.MustGatherSpec{
+			ServiceAccountName: "test-sa",
+			Storage: &mustgatherv1alpha1.Storage{
+				Type: mustgatherv1alpha1.StorageTypePersistentVolume,
+				PersistentVolume: mustgatherv1alpha1.PersistentVolumeConfig{
+					Claim: mustgatherv1alpha1.PersistentVolumeClaimReference{
+						Name: "test-pvc",
+					},
+					SubPath: baseSubPath,
+				},
+			},
+			UploadTarget: &mustgatherv1alpha1.UploadTargetSpec{
+				Type: mustgatherv1alpha1.UploadTypeSFTP,
+				SFTP: &mustgatherv1alpha1.SFTPSpec{
+					CaseID: "1234",
+					CaseManagementAccountSecretRef: v1.LocalObjectReference{
+						Name: "test-secret",
+					},
+				},
+			},
+		},
+	}
+
+	job := getJobTemplate("gather-image", "operator-image", mustGather, "")
+	expectedSubPath := resolvePVCSubPath(baseSubPath, runID)
+
+	var gatherSubPath, uploadSubPath string
+	for _, container := range job.Spec.Template.Spec.Containers {
+		for _, vm := range container.VolumeMounts {
+			if vm.Name != outputVolumeName {
+				continue
+			}
+			switch container.Name {
+			case gatherContainerName:
+				gatherSubPath = vm.SubPath
+			case uploadContainerName:
+				uploadSubPath = vm.SubPath
+			}
+		}
+	}
+
+	if gatherSubPath != expectedSubPath {
+		t.Fatalf("gather SubPath = %q, want %q", gatherSubPath, expectedSubPath)
+	}
+	if uploadSubPath != expectedSubPath {
+		t.Fatalf("upload SubPath = %q, want %q", uploadSubPath, expectedSubPath)
+	}
+	if gatherSubPath != uploadSubPath {
+		t.Fatalf("gather and upload SubPath mismatch: gather=%q upload=%q", gatherSubPath, uploadSubPath)
+	}
+}
+
+func Test_getJobTemplate_PVCSubPathDistinctRunIDs(t *testing.T) {
+	originalJobRunID := jobRunID
+	defer func() { jobRunID = originalJobRunID }()
+
+	baseSubPath := "test-path"
+	mustGather := mustgatherv1alpha1.MustGather{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-mg",
+			Namespace: "test-ns",
+		},
+		Spec: mustgatherv1alpha1.MustGatherSpec{
+			ServiceAccountName: "test-sa",
+			Storage: &mustgatherv1alpha1.Storage{
+				Type: mustgatherv1alpha1.StorageTypePersistentVolume,
+				PersistentVolume: mustgatherv1alpha1.PersistentVolumeConfig{
+					Claim: mustgatherv1alpha1.PersistentVolumeClaimReference{
+						Name: "test-pvc",
+					},
+					SubPath: baseSubPath,
+				},
+			},
+		},
+	}
+
+	jobRunID = func() string { return "20260101_120000Z" }
+	firstSubPath := pvcEffectiveSubPath(mustGather.Spec.Storage)
+
+	jobRunID = func() string { return "20260101_130000Z" }
+	secondSubPath := pvcEffectiveSubPath(mustGather.Spec.Storage)
+
+	if firstSubPath == secondSubPath {
+		t.Fatalf("expected distinct SubPaths for different runIDs, both got %q", firstSubPath)
+	}
+	if firstSubPath != resolvePVCSubPath(baseSubPath, "20260101_120000Z") {
+		t.Fatalf("first SubPath = %q, want %q", firstSubPath, resolvePVCSubPath(baseSubPath, "20260101_120000Z"))
+	}
+	if secondSubPath != resolvePVCSubPath(baseSubPath, "20260101_130000Z") {
+		t.Fatalf("second SubPath = %q, want %q", secondSubPath, resolvePVCSubPath(baseSubPath, "20260101_130000Z"))
+	}
+}
 
 func Test_initializeJobTemplate(t *testing.T) {
 	testName := "testName"
@@ -153,7 +301,11 @@ func Test_getGatherContainer(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			container := getGatherContainer(tt.mustGatherImage, tt.audit, tt.timeout, tt.storage, "", tt.command, tt.args)
+			pvcSubPath := ""
+			if tt.storage != nil {
+				pvcSubPath = resolvePVCSubPath(tt.storage.PersistentVolume.SubPath, "20260101_120000Z")
+			}
+			container := getGatherContainer(tt.mustGatherImage, tt.audit, tt.timeout, pvcSubPath, "", tt.command, tt.args)
 
 			if len(tt.command) == 0 {
 				containerCommand := container.Command[2]
@@ -188,8 +340,9 @@ func Test_getGatherContainer(t *testing.T) {
 				if volumeMount.Name != outputVolumeName {
 					t.Fatalf("volume mount name was not correctly set. got %v, wanted %v", volumeMount.Name, outputVolumeName)
 				}
-				if volumeMount.SubPath != tt.storage.PersistentVolume.SubPath {
-					t.Fatalf("volume mount subpath was not correctly set. got %v, wanted %v", volumeMount.SubPath, tt.storage.PersistentVolume.SubPath)
+				expectedSubPath := resolvePVCSubPath(tt.storage.PersistentVolume.SubPath, "20260101_120000Z")
+				if volumeMount.SubPath != expectedSubPath {
+					t.Fatalf("volume mount subpath was not correctly set. got %v, wanted %v", volumeMount.SubPath, expectedSubPath)
 				}
 			}
 		})
@@ -207,6 +360,7 @@ func Test_getUploadContainer(t *testing.T) {
 		httpsProxy       string
 		noProxy          string
 		mountCAConfigMap bool
+		pvcSubPath       string
 		secretKeyRefName v1.LocalObjectReference
 	}{
 		{
@@ -262,14 +416,36 @@ func Test_getUploadContainer(t *testing.T) {
 			secretKeyRefName: v1.LocalObjectReference{Name: "testSecretKeyRefName"},
 			mountCAConfigMap: true,
 		},
+		{
+			name:             "With PVC subPath",
+			operatorImage:    "testImage",
+			caseId:           "1234",
+			httpProxy:        "testHttpProxy",
+			httpsProxy:       "testHttpsProxy",
+			secretKeyRefName: v1.LocalObjectReference{Name: "testSecretKeyRefName"},
+			pvcSubPath:       "test-path/20260101_120000Z",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			testFailed := false
-			container := getUploadContainer(tt.operatorImage, tt.caseId, tt.host, tt.internalUser, tt.httpProxy, tt.httpsProxy, tt.noProxy, tt.secretKeyRefName, tt.mountCAConfigMap)
+			container := getUploadContainer(tt.operatorImage, tt.caseId, tt.host, tt.internalUser, tt.httpProxy, tt.httpsProxy, tt.noProxy, tt.secretKeyRefName, tt.mountCAConfigMap, tt.pvcSubPath)
 
 			if container.Image != tt.operatorImage {
 				t.Fatalf("expected container image %v but got %v", tt.operatorImage, container.Image)
+			}
+
+			if tt.pvcSubPath != "" {
+				var outputSubPath string
+				for _, vm := range container.VolumeMounts {
+					if vm.Name == outputVolumeName {
+						outputSubPath = vm.SubPath
+						break
+					}
+				}
+				if outputSubPath != tt.pvcSubPath {
+					t.Fatalf("expected output volume SubPath %q but got %q", tt.pvcSubPath, outputSubPath)
+				}
 			}
 
 			if tt.mountCAConfigMap {

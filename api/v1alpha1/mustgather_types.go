@@ -174,7 +174,9 @@ type PersistentVolumeConfig struct {
 	// claim defines the PersistentVolumeClaim to use.
 	// +required
 	Claim PersistentVolumeClaimReference `json:"claim"`
-	// subPath defines the path to a sub directory within the PersistentVolume to use.
+	// subPath defines an optional base prefix within the PersistentVolumeClaim.
+	// The operator appends a unique per-run subdirectory under this prefix for each Job.
+	// When omitted, the operator uses a default base prefix of "must-gather".
 	// +optional
 	SubPath string `json:"subPath,omitempty"`
 }
