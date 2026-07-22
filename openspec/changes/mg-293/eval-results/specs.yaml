@@ -1,0 +1,10 @@
+artifact_id: specs
+artifact_path: openspec/changes/mg-293/specs.md
+stage: specs
+stage_eval_file: null
+gate: skip
+scored_at: "2026-07-22T06:38:00Z"
+overall_score: null
+overall_pass: true
+refinement_round: 1
+note: No stage eval YAML; gap analysis and quality assessment only

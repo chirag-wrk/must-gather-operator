@@ -1,0 +1,27 @@
+artifact_id: tasks
+artifact_path: openspec/changes/mg-293/tasks.md
+phase_scope: 4
+stage: tasks
+stage_eval_file: evals/tasks_eval.yaml
+scored_at: "2026-07-22T14:40:00+05:30"
+overall_score: 96
+overall_pass: true
+refinement_round: 1
+cases:
+  - id: eval-r001-tasks-001
+    score: 92
+    pass: true
+    failures:
+      - "Phase 4 defers PVC isolation verification to Phase 3 (T3_6) and Phase 7 E2E — no new isolation task in Phase 4 scope (correct per plan)"
+  - id: eval-r001-tasks-002
+    score: 98
+    pass: true
+    failures: []
+  - id: eval-r001-tasks-003
+    score: 95
+    pass: true
+    failures: []
+  - id: eval-r001-tasks-004
+    score: 98
+    pass: true
+    failures: []

@@ -1,0 +1,119 @@
+stage: plan
+template: evals/refined-templates/plan-template.md
+artifact: technical_plan.md
+version: 1
+eval_count: 4
+evals:
+  - id: eval-r001-plan-001
+    round: 1
+    stage: plan
+    source_issue_ids: [ISSUE-001]
+    patterns: [PAT-001]
+    input_refs:
+      - evals/evals/outputs/epic-bug-analysis/rca-summary.md
+      - evals/evals/outputs/epic-bug-analysis/pattern-analysis.md
+    prompt: |
+      When the feature introduces PVC storage for must-gather output, does the technical
+      plan's § 2 (Persistence & state) include an explicit per-invocation isolation
+      analysis?
+
+      The plan must:
+      1. Analyze how multiple MustGather CRs writing to the same PVC will be isolated
+      2. Propose a uniqueness strategy (e.g., subPathExpr with pod name, timestamp,
+         or CR UID)
+      3. Address concurrent write safety
+      4. Define retention/cleanup semantics for old must-gather data
+      5. Not use static subPath as the isolation mechanism (proven insufficient per
+         OCPBUGS-64626)
+    assertions:
+      must_mention:
+        - "isolation"
+        - "per-invocation"
+        - "subPath"
+        - "uniqueness"
+        - "concurrent"
+    scoring:
+      method: weighted_checklist
+      pass_threshold: 80
+
+  - id: eval-r001-plan-002
+    round: 1
+    stage: plan
+    source_issue_ids: [ISSUE-003]
+    patterns: [PAT-002, PAT-003]
+    input_refs:
+      - evals/evals/outputs/epic-bug-analysis/rca-summary.md
+    prompt: |
+      When the feature modifies volume mount configuration in a multi-container pod,
+      does the plan's implementation phases include a consistency requirement for both
+      containers?
+
+      The plan must:
+      1. Identify that the gather and upload containers share a volume
+      2. Require that any mount configuration change applies to BOTH containers
+      3. Include edge-case handling for user-provided path inputs in the relevant phase
+      4. Include a verification hook for multi-container mount consistency
+    assertions:
+      must_mention:
+        - "gather container"
+        - "upload container"
+        - "shared volume"
+        - "both containers"
+        - "edge case"
+    scoring:
+      method: weighted_checklist
+      pass_threshold: 80
+
+  - id: eval-r001-plan-003
+    round: 1
+    stage: plan
+    source_issue_ids: [ISSUE-004]
+    patterns: [PAT-005]
+    input_refs:
+      - evals/evals/outputs/epic-bug-analysis/issue-taxonomy.json
+    prompt: |
+      When the feature introduces new validation logic (e.g., ImageStream validation),
+      does the plan's § 3.2 (Controller/runtime interfaces) require distinct status
+      condition types for different failure categories?
+
+      The plan must:
+      1. Define specific condition types for each validation failure mode
+      2. Not rely on a single generic condition type (e.g., ReconcileError)
+      3. Include condition type definitions in § 3.2 or § 4
+    assertions:
+      must_mention:
+        - "condition type"
+        - "validation"
+        - "distinct"
+        - "failure"
+    scoring:
+      method: weighted_checklist
+      pass_threshold: 80
+
+  - id: eval-r001-plan-004
+    round: 1
+    stage: plan
+    source_issue_ids: [ISSUE-005]
+    patterns: [PAT-006, PAT-004]
+    input_refs:
+      - evals/evals/outputs/epic-bug-analysis/issue-taxonomy.json
+    prompt: |
+      When the feature introduces fallback behavior via environment variables (e.g.,
+      DefaultMustGatherImage), does the plan include a phase or verification hook for
+      validating env var defaults are non-empty?
+
+      The plan must:
+      1. Include a phase or step for env var default validation
+      2. Specify fail-fast behavior when required env vars are empty
+      3. Address conditional resource injection (env vars only when needed)
+      4. Include env var validation in the verification matrix (§ 6)
+    assertions:
+      must_mention:
+        - "environment variable"
+        - "default"
+        - "empty"
+        - "validation"
+        - "fail-fast"
+    scoring:
+      method: weighted_checklist
+      pass_threshold: 80

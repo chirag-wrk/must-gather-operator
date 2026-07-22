@@ -1,0 +1,28 @@
+artifact_id: tasks
+artifact_path: openspec/changes/mg-293/tasks.md
+phase_scope: 5
+stage: tasks
+stage_eval_file: evals/tasks_eval.yaml
+scored_at: "2026-07-22T15:10:00+05:30"
+overall_score: 95
+overall_pass: true
+refinement_round: 1
+cases:
+  - id: eval-r001-tasks-001
+    score: 92
+    pass: true
+    failures:
+      - "Phase 5 defers PVC isolation verification to Phase 3 (T3_6 complete) and Phase 7 E2E — no new isolation task in Phase 5 scope (correct per plan)"
+  - id: eval-r001-tasks-002
+    score: 90
+    pass: true
+    failures:
+      - "Phase 5 does not introduce path/subPath fields; edge-case path sanitization covered in Phase 3 (T3_2/T3_6). T5_4 covers config-file missing edge case only."
+  - id: eval-r001-tasks-003
+    score: 96
+    pass: true
+    failures: []
+  - id: eval-r001-tasks-004
+    score: 98
+    pass: true
+    failures: []

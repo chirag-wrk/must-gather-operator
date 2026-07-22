@@ -1,0 +1,26 @@
+artifact_id: tasks
+artifact_path: openspec/changes/mg-293/tasks.md
+phase_scope: 2
+stage: tasks
+stage_eval_file: evals/tasks_eval.yaml
+scored_at: "2026-07-22T08:12:00Z"
+overall_score: 97
+overall_pass: true
+refinement_round: 2
+cases:
+  - id: eval-r001-tasks-001
+    score: 96
+    pass: true
+    failures: []
+  - id: eval-r001-tasks-002
+    score: 97
+    pass: true
+    failures: []
+  - id: eval-r001-tasks-003
+    score: 96
+    pass: true
+    failures: []
+  - id: eval-r001-tasks-004
+    score: 98
+    pass: true
+    failures: []

@@ -1,0 +1,26 @@
+artifact_id: tasks
+artifact_path: openspec/changes/mg-293/tasks.md
+stage: tasks
+stage_eval_file: evals/tasks_eval.yaml
+phase_scope: 7
+scored_at: "2026-07-22T15:40:00+05:30"
+overall_score: 96
+overall_pass: true
+cases:
+  - id: eval-r001-tasks-001
+    score: 95
+    pass: true
+    failures: []
+  - id: eval-r001-tasks-002
+    score: 92
+    pass: true
+    failures: []
+  - id: eval-r001-tasks-003
+    score: 98
+    pass: true
+    failures: []
+  - id: eval-r001-tasks-004
+    score: 96
+    pass: true
+    failures:
+      - "Env var validation closed in Phase 6 §0 reference (T6_5); no new Phase 7 task required"

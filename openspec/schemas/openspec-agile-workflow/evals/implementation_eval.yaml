@@ -1,0 +1,116 @@
+stage: implementation
+template: evals/refined-templates/implementation-template.md
+artifact: implementation.md
+version: 1
+eval_count: 4
+evals:
+  - id: eval-r001-impl-001
+    round: 1
+    stage: implementation
+    source_issue_ids: [ISSUE-003]
+    patterns: [PAT-003]
+    input_refs:
+      - evals/evals/outputs/epic-bug-analysis/rca-summary.md
+    prompt: |
+      When a task introduces a user-facing path field (e.g., subPath for PVC storage),
+      does the implementation log's Edge-Case & Input Validation Coverage table show
+      explicit handling for all edge cases?
+
+      The implementation log must:
+      1. Include the Edge-Case & Input Validation Coverage table
+      2. Show "handled" for Empty, Whitespace, Separator-only, and Trim columns
+      3. Reference test files covering each edge case
+      4. Not leave any cell as "N/A" for a path-type field
+    assertions:
+      must_mention:
+        - "edge case"
+        - "empty"
+        - "whitespace"
+        - "trim"
+        - "test"
+    scoring:
+      method: weighted_checklist
+      pass_threshold: 80
+
+  - id: eval-r001-impl-002
+    round: 1
+    stage: implementation
+    source_issue_ids: [ISSUE-004]
+    patterns: [PAT-005]
+    input_refs:
+      - evals/evals/outputs/epic-bug-analysis/issue-taxonomy.json
+    prompt: |
+      When a task sets status conditions on the MustGather CR, does the implementation
+      log's Status Condition Types Used table show distinct condition types for each
+      failure category?
+
+      The implementation log must:
+      1. Include the Status Condition Types Used table
+      2. Show at least 2 distinct condition types if the task handles multiple
+         failure modes
+      3. Mark "Yes" in the "Distinct from generic?" column
+      4. Not use a single "ReconcileError" for all failures
+    assertions:
+      must_mention:
+        - "condition type"
+        - "distinct"
+        - "failure category"
+    scoring:
+      method: weighted_checklist
+      pass_threshold: 80
+
+  - id: eval-r001-impl-003
+    round: 1
+    stage: implementation
+    source_issue_ids: [ISSUE-001]
+    patterns: [PAT-001, PAT-002]
+    input_refs:
+      - evals/evals/outputs/epic-bug-analysis/rca-summary.md
+    prompt: |
+      When a task implements PVC volume mounts in a multi-container pod, does the
+      implementation log show that BOTH containers (gather and upload) were updated
+      consistently?
+
+      The implementation log must:
+      1. List files touched in both the gather container and upload container code paths
+      2. Show that mount configuration is identical for shared volumes
+      3. Include test results covering multi-container mount consistency
+      4. Not modify one container's mount without the other
+    assertions:
+      must_mention:
+        - "gather"
+        - "upload"
+        - "both"
+        - "mount"
+        - "volume"
+    scoring:
+      method: weighted_checklist
+      pass_threshold: 80
+
+  - id: eval-r001-impl-004
+    round: 1
+    stage: implementation
+    source_issue_ids: [ISSUE-005]
+    patterns: [PAT-006, PAT-004]
+    input_refs:
+      - evals/evals/outputs/epic-bug-analysis/issue-taxonomy.json
+    prompt: |
+      When a task implements fallback to an environment variable default (e.g.,
+      DefaultMustGatherImage), does the implementation log show that the default is
+      validated as non-empty?
+
+      The implementation log must:
+      1. Show that the env var fallback includes a non-empty guard
+      2. Include test results for the empty-default case
+      3. Show that conditional resource injection is used (env var only added when
+         config requires it)
+      4. Include a deviations note if validation was deferred
+    assertions:
+      must_mention:
+        - "default"
+        - "empty"
+        - "validation"
+        - "environment variable"
+    scoring:
+      method: weighted_checklist
+      pass_threshold: 80

@@ -1,0 +1,9 @@
+jira_key: MG-293
+target_repo: https://github.com/chirag-wrk/must-gather-operator.git
+created_at: "2026-07-22T06:24:00Z"
+jira_summary: Enhancement proposal for integration with must-gather-clean
+jira_url: https://issues.redhat.com/browse/MG-293
+epic_key: MG-297
+epic_name: Integrate must-gather-clean with must-gather-operator
+epic_url: https://issues.redhat.com/browse/MG-297
+jira_fetched_at: "2026-07-22T06:24:00Z"

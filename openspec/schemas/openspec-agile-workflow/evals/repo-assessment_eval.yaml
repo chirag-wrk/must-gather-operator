@@ -1,0 +1,94 @@
+stage: repo-assessment
+template: evals/refined-templates/repo-assessment-template.md
+artifact: repo_assessment.md
+version: 1
+eval_count: 3
+evals:
+  - id: eval-r001-ra-001
+    round: 1
+    stage: repo-assessment
+    source_issue_ids: [ISSUE-001]
+    patterns: [PAT-001]
+    input_refs:
+      - evals/evals/outputs/epic-bug-analysis/rca-summary.md
+      - evals/evals/outputs/epic-bug-analysis/pattern-analysis.md
+    prompt: |
+      When the feature spec introduces PVC or persistent volume support for a Kubernetes
+      operator, does the repo assessment identify the risk of data overwrite across
+      multiple invocations in § 11 (Risks & Downstream Impacts)?
+
+      The assessment must:
+      1. Identify that shared PVC storage without per-invocation isolation is a data
+         integrity risk
+      2. Note in § 4.1 whether existing volume mount patterns use static subPath or
+         dynamic subPathExpr
+      3. Include an UNVERIFIED item in § 11.1 if the branch lacks multi-run isolation
+         logic
+    assertions:
+      must_mention:
+        - "per-invocation isolation"
+        - "subPath"
+        - "data overwrite"
+        - "multiple runs"
+    scoring:
+      method: weighted_checklist
+      pass_threshold: 80
+
+  - id: eval-r001-ra-002
+    round: 1
+    stage: repo-assessment
+    source_issue_ids: [ISSUE-004, ISSUE-005]
+    patterns: [PAT-005, PAT-006]
+    input_refs:
+      - evals/evals/outputs/epic-bug-analysis/issue-taxonomy.json
+    prompt: |
+      When assessing an operator repo that uses status conditions, does the repo
+      assessment document the condition type naming conventions and default env var
+      validation patterns in § 4.4 (Status/Health Reporting) and § 4.1 (Configuration
+      Surface)?
+
+      The assessment must:
+      1. List existing condition types and their semantics in § 4.4
+      2. Document how env vars providing default images are consumed and whether
+         empty-value guards exist
+      3. Note if the controller uses a single generic condition type for multiple
+         failure categories
+    assertions:
+      must_mention:
+        - "condition type"
+        - "status condition"
+        - "environment variable"
+        - "default image"
+    scoring:
+      method: weighted_checklist
+      pass_threshold: 80
+
+  - id: eval-r001-ra-003
+    round: 1
+    stage: repo-assessment
+    source_issue_ids: [ISSUE-003]
+    patterns: [PAT-002, PAT-003]
+    input_refs:
+      - evals/evals/outputs/epic-bug-analysis/rca-summary.md
+    prompt: |
+      When the operator uses multi-container pods with shared volumes (e.g., gather +
+      upload containers), does the repo assessment document the shared volume architecture
+      and mount consistency requirements in § 1.4 (Runtime Data/Control Flow) and § 6
+      (Architectural Guardrails)?
+
+      The assessment must:
+      1. Describe the multi-container volume sharing pattern
+      2. Note that mount configuration changes must be applied to ALL containers sharing
+         the volume
+      3. Document any user-facing string fields (like subPath) and their current
+         edge-case handling
+    assertions:
+      must_mention:
+        - "shared volume"
+        - "gather"
+        - "upload"
+        - "mount"
+        - "container"
+    scoring:
+      method: weighted_checklist
+      pass_threshold: 80

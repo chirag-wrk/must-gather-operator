@@ -1,0 +1,335 @@
+machine:
+  state: COMPLETE
+  current_task_id: null
+  current_task_index: 7
+  total_tasks: 7
+  last_transition: "2026-07-22T16:00:00+05:30"
+
+current_plan_phase: 7
+total_plan_phases: 7
+phase_1_status: complete
+phase_2_status: complete
+phase_3_status: complete
+phase_4_status: complete
+phase_5_status: complete
+phase_6_status: complete
+phase_7_tasks_status: approved
+phase_5_tasks_status: approved
+codegen_mode: direct
+
+completed:
+  - task_id: T1_1
+    approved_at: "2026-07-22T07:06:00Z"
+    files_changed:
+      - api/v1alpha1/mustgather_types.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T1_2
+    approved_at: "2026-07-22T07:10:00Z"
+    files_changed:
+      - api/v1alpha1/mustgather_types.go
+      - api/v1alpha1/mustgather_cel_test.go
+      - deploy/crds/operator.openshift.io_mustgathers.yaml
+      - api/v1alpha1/zz_generated.deepcopy.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T1_3
+    approved_at: "2026-07-22T08:04:00Z"
+    files_changed:
+      - api/v1alpha1/zz_generated.deepcopy.go
+      - api/v1alpha1/zz_generated.openapi.go
+      - deploy/crds/operator.openshift.io_mustgathers.yaml
+      - bundle/manifests/tech-preview/operator.openshift.io_mustgathers.yaml
+    verification_pass: true
+    test_result: PASS
+  - task_id: T1_4
+    approved_at: "2026-07-22T08:07:00Z"
+    files_changed:
+      - api/v1alpha1/mustgather_crd_schema_test.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T1_5
+    approved_at: "2026-07-22T08:09:00Z"
+    files_changed:
+      - examples/mustgather_obfuscate_default_upload.yaml
+      - examples/mustgather_obfuscate_custom_config.yaml
+      - examples/mustgather_obfuscate_source_pvc.yaml
+      - api/v1alpha1/mustgather_obfuscate_examples_test.go
+      - api/v1alpha1/mustgather_crd_schema_test.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T1_6
+    approved_at: "2026-07-22T08:10:00Z"
+    files_changed:
+      - api/v1alpha1/mustgather_types.go
+      - api/v1alpha1/mustgather_obfuscate_godoc_test.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T2_1
+    approved_at: "2026-07-22T08:26:00Z"
+    files_changed:
+      - go.mod
+      - go.sum
+      - tools.go
+      - vendor/
+    verification_pass: true
+    test_result: PASS
+  - task_id: T2_2
+    approved_at: "2026-07-22T08:34:00Z"
+    files_changed:
+      - pkg/obfuscate/constants.go
+      - pkg/obfuscate/run.go
+      - pkg/obfuscate/run_test.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T2_3
+    approved_at: "2026-07-22T08:42:00Z"
+    files_changed:
+      - main.go
+      - cmd_root.go
+      - cmd_obfuscate.go
+      - main_test.go
+      - go.mod
+      - go.sum
+      - vendor/
+    verification_pass: true
+    test_result: PASS
+  - task_id: T2_4
+    approved_at: "2026-07-22T08:50:00Z"
+    files_changed:
+      - pkg/obfuscate/run_fixture_test.go
+      - pkg/obfuscate/run.go
+      - pkg/obfuscate/testdata/config.yaml
+      - pkg/obfuscate/testdata/input/cluster/node1.log
+      - pkg/obfuscate/testdata/input/cluster/node2.log
+      - pkg/obfuscate/testdata/input/resources/secret.yaml
+    verification_pass: true
+    test_result: PASS
+  - task_id: T2_5
+    approved_at: "2026-07-22T08:58:00Z"
+    files_changed:
+      - main_binary_test.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T3_1
+    approved_at: "2026-07-22T14:23:00+05:30"
+    files_changed:
+      - controllers/mustgather/template.go
+      - controllers/mustgather/template_test.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T3_2
+    approved_at: "2026-07-22T14:25:00+05:30"
+    files_changed:
+      - controllers/mustgather/template.go
+      - controllers/mustgather/template_test.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T3_3
+    approved_at: "2026-07-22T14:27:00+05:30"
+    files_changed:
+      - controllers/mustgather/template.go
+      - controllers/mustgather/template_test.go
+      - controllers/mustgather/mustgather_controller.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T3_4
+    approved_at: "2026-07-22T14:29:00+05:30"
+    files_changed:
+      - controllers/mustgather/template.go
+      - controllers/mustgather/template_test.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T3_5
+    approved_at: "2026-07-22T14:31:00+05:30"
+    files_changed:
+      - controllers/mustgather/template_test.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T3_6
+    approved_at: "2026-07-22T14:36:00+05:30"
+    files_changed:
+      - controllers/mustgather/template_test.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T4_1
+    approved_at: "2026-07-22T14:44:00+05:30"
+    files_changed:
+      - build/bin/upload
+    verification_pass: true
+    test_result: PASS
+  - task_id: T4_2
+    approved_at: "2026-07-22T14:47:00+05:30"
+    files_changed:
+      - build/bin/upload
+    verification_pass: true
+    test_result: PASS
+  - task_id: T4_3
+    approved_at: "2026-07-22T14:54:00+05:30"
+    files_changed:
+      - build/bin/upload
+    verification_pass: true
+    test_result: PASS
+  - task_id: T4_4
+    approved_at: "2026-07-22T14:59:00+05:30"
+    files_changed:
+      - build/bin/upload
+    verification_pass: true
+    test_result: PASS
+  - task_id: T4_5
+    approved_at: "2026-07-22T15:02:00+05:30"
+    files_changed:
+      - build/bin/upload
+    verification_pass: true
+    test_result: PASS
+  - task_id: T4_6
+    approved_at: "2026-07-22T15:06:00+05:30"
+    files_changed:
+      - build/bin/upload_test.sh
+    verification_pass: true
+    test_result: PASS
+  - task_id: T5_1
+    approved_at: "2026-07-22T15:11:00+05:30"
+    files_changed:
+      - build/obfuscate-config.yaml
+    verification_pass: true
+    test_result: PASS
+  - task_id: T5_2
+    approved_at: "2026-07-22T15:13:00+05:30"
+    files_changed:
+      - build/Dockerfile
+    verification_pass: true
+    test_result: PASS
+  - task_id: T5_3
+    approved_at: "2026-07-22T15:14:00+05:30"
+    files_changed:
+      - Dockerfile.openshift
+    verification_pass: true
+    test_result: PASS
+  - task_id: T5_4
+    approved_at: "2026-07-22T15:16:00+05:30"
+    files_changed:
+      - pkg/obfuscate/run_default_config_test.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T5_5
+    approved_at: "2026-07-22T15:23:00+05:30"
+    files_changed:
+      - build/obfuscate_config_image_test.sh
+    verification_pass: true
+    test_result: PASS
+  - task_id: T6_1
+    approved_at: "2026-07-22T15:27:00+05:30"
+    files_changed:
+      - controllers/mustgather/conditions.go
+      - controllers/mustgather/conditions_test.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T6_2
+    approved_at: "2026-07-22T15:28:00+05:30"
+    files_changed:
+      - controllers/mustgather/mustgather_controller.go
+      - controllers/mustgather/mustgather_controller_test.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T6_3
+    approved_at: "2026-07-22T15:30:00+05:30"
+    files_changed:
+      - controllers/mustgather/obfuscate_validation.go
+      - controllers/mustgather/obfuscate_validation_test.go
+      - controllers/mustgather/mustgather_controller.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T6_4
+    approved_at: "2026-07-22T15:33:00+05:30"
+    files_changed:
+      - controllers/mustgather/mustgather_obfuscate_conditions_test.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T6_5
+    approved_at: "2026-07-22T15:35:00+05:30"
+    files_changed:
+      - controllers/mustgather/mustgather_controller.go
+      - controllers/mustgather/mustgather_obfuscate_env_test.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T6_6
+    approved_at: "2026-07-22T15:37:00+05:30"
+    files_changed:
+      - controllers/mustgather/mustgather_controller.go
+      - controllers/mustgather/mustgather_rbac_test.go
+      - deploy/02_must-gather-operator.ClusterRole.yaml
+    verification_pass: true
+    test_result: PASS
+  - task_id: T7_1
+    approved_at: "2026-07-22T15:43:00+05:30"
+    files_changed:
+      - controllers/mustgather/template_test.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T7_2
+    approved_at: "2026-07-22T15:45:00+05:30"
+    files_changed:
+      - examples/README.md
+      - examples/mustgather_obfuscate_default_upload.yaml
+      - examples/mustgather_obfuscate_custom_config.yaml
+      - examples/mustgather_obfuscate_source_pvc.yaml
+      - api/v1alpha1/mustgather_obfuscate_examples_test.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T7_3
+    approved_at: "2026-07-22T15:47:00+05:30"
+    files_changed:
+      - test/e2e/testdata/obfuscation-configmap-valid.yaml
+      - test/e2e/testdata/obfuscation-configmap-invalid.yaml
+      - test/e2e/testdata/obfuscation-configmap-mac-disabled.yaml
+      - test/e2e/obfuscate_helpers.go
+      - test/e2e/obfuscate_helpers_test.go
+      - test/e2e/must_gather_operator_test.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T7_4
+    approved_at: "2026-07-22T15:50:00+05:30"
+    files_changed:
+      - test/e2e/obfuscate_mode1_test.go
+      - test/e2e/obfuscate_helpers.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T7_5
+    approved_at: "2026-07-22T15:53:00+05:30"
+    files_changed:
+      - test/e2e/obfuscate_source_pvc_test.go
+      - test/e2e/obfuscate_helpers.go
+      - test/e2e/obfuscate_helpers_test.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T7_6
+    approved_at: "2026-07-22T15:55:00+05:30"
+    files_changed:
+      - test/e2e/obfuscate_invalid_config_test.go
+      - test/e2e/obfuscate_helpers.go
+      - test/e2e/obfuscate_helpers_test.go
+    verification_pass: true
+    test_result: PASS
+  - task_id: T7_7
+    approved_at: "2026-07-22T16:00:00+05:30"
+    files_changed:
+      - test/e2e/obfuscate_bundle.go
+      - test/e2e/obfuscate_bundle_test.go
+      - test/e2e/obfuscate_bundle_verify_test.go
+      - test/e2e/testdata/obfuscate-bundle/obfuscation.log
+      - test/e2e/testdata/obfuscate-bundle/report.yaml
+      - test/e2e/testdata/obfuscate-bundle/cluster/node1.log
+    verification_pass: true
+    test_result: PASS
+
+current_task_result: null
+
+rejections: []
+
+phase_pr_urls: {}
+
+task_sizing:
+  min: 5
+  max: 15
+  consolidation_threshold: 2

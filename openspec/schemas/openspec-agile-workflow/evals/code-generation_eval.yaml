@@ -1,0 +1,127 @@
+stage: code-generation
+template: null
+artifact: generated_code
+version: 1
+eval_count: 4
+oape_commands:
+  - api-implement
+  - api-generate-tests
+  - manual
+evals:
+  - id: eval-r001-cg-001
+    round: 1
+    stage: code-generation
+    oape_command: api-implement
+    source_issue_ids: [ISSUE-003]
+    patterns: [PAT-003]
+    input_refs:
+      - evals/evals/outputs/epic-bug-analysis/rca-summary.md
+      - evals/evals/inputs/bugs/OCPBUGS-64626.md
+    prompt: |
+      When implementing a function that processes user-provided path inputs (e.g.,
+      outputSubPathExpr for PVC subPath), does the generated code include explicit
+      edge-case handling?
+
+      The code must:
+      1. Trim whitespace from the input before use
+      2. Handle empty string input gracefully (not produce invalid paths)
+      3. Handle separator-only input ("/" or "//") — strip or replace
+      4. Produce a valid Kubernetes subPathExpr or subPath value in all cases
+      5. Include corresponding unit tests for each edge case
+    assertions:
+      must_mention:
+        - "strings.TrimSpace"
+        - "empty"
+        - "subPath"
+        - "test"
+    scoring:
+      method: weighted_checklist
+      pass_threshold: 80
+
+  - id: eval-r001-cg-002
+    round: 1
+    stage: code-generation
+    oape_command: api-implement
+    source_issue_ids: [ISSUE-004]
+    patterns: [PAT-005]
+    input_refs:
+      - evals/evals/outputs/epic-bug-analysis/issue-taxonomy.json
+    prompt: |
+      When implementing controller reconciliation that can fail in multiple ways
+      (validation error, image resolution error, permission error), does the generated
+      code use distinct status condition types for each failure category?
+
+      The code must:
+      1. Define or use separate condition type constants for each failure domain
+      2. Set conditions with the appropriate type, not a single generic type
+      3. Include condition reason strings that distinguish failure modes
+      4. Not reuse "ReconcileError" for validation failures alongside other failures
+    assertions:
+      must_mention:
+        - "condition"
+        - "type"
+        - "validation"
+        - "distinct"
+    scoring:
+      method: weighted_checklist
+      pass_threshold: 80
+
+  - id: eval-r001-cg-003
+    round: 1
+    stage: code-generation
+    oape_command: api-generate-tests
+    source_issue_ids: [ISSUE-001, ISSUE-002]
+    patterns: [PAT-001, PAT-002]
+    input_refs:
+      - evals/evals/outputs/epic-bug-analysis/rca-summary.md
+    prompt: |
+      When generating tests for PVC storage support with multi-container pods, do the
+      tests verify per-invocation isolation and mount consistency?
+
+      The tests must:
+      1. Include a test case verifying that two MustGather CRs on the same PVC produce
+         jobs with distinct subPathExpr values
+      2. Verify that both gather and upload containers use the same mount configuration
+      3. Test the subPathExpr computation with various inputs (empty subPath, populated
+         subPath, whitespace subPath)
+      4. Use table-driven test patterns consistent with the repository
+    assertions:
+      must_mention:
+        - "subPathExpr"
+        - "gather"
+        - "upload"
+        - "isolation"
+        - "table-driven"
+    scoring:
+      method: weighted_checklist
+      pass_threshold: 80
+
+  - id: eval-r001-cg-004
+    round: 1
+    stage: code-generation
+    oape_command: manual
+    source_issue_ids: [ISSUE-005]
+    patterns: [PAT-006, PAT-004]
+    input_refs:
+      - evals/evals/outputs/epic-bug-analysis/issue-taxonomy.json
+    prompt: |
+      When implementing env var fallback logic (e.g., getMustGatherImage falling back
+      to DefaultMustGatherImage), does the generated code validate the default is
+      non-empty before using it?
+
+      The code must:
+      1. Check that the env var value is non-empty before using as fallback
+      2. Return an error or set a degraded condition if the default is empty
+      3. Only inject POD_NAME env var when PVC storage is configured (conditional
+         resource injection)
+      4. Include a test for the empty-default case
+    assertions:
+      must_mention:
+        - "empty"
+        - "default"
+        - "error"
+        - "condition"
+        - "env"
+    scoring:
+      method: weighted_checklist
+      pass_threshold: 80

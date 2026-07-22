@@ -1,0 +1,55 @@
+{
+  "metadata": {
+    "ticket_id": "MG-293",
+    "doc_type": "enhancement",
+    "pass_threshold": 80,
+    "output_mode": "json_plus_summary",
+    "weights_applied": {
+      "completeness": 0.6,
+      "quality": 0.4
+    }
+  },
+  "validation_results": {
+    "completeness_score": 91,
+    "quality_score": 86,
+    "overall_score": 89,
+    "overall_status": "PASS",
+    "missing_elements": [
+      "Mode 2 (obfuscate-only) artifact retrieval: spec states cleaned output lives in staging emptyDir but does not define how the cluster administrator extracts the obfuscated bundle after Job completion",
+      "RBAC implications: spec references ConfigMap in operator namespace and PVC access but does not enumerate required ServiceAccount permissions or SCC considerations beyond gather chown/upload uid"
+    ],
+    "quality_issues": [
+      {
+        "type": "Ambiguity",
+        "quote": "the obfuscated bundle is in the staging directory for the administrator to retrieve",
+        "suggestion": "Define retrieval mechanism for Mode 2: e.g., persist cleaned output to a named PVC subpath, expose via `kubectl cp` from Job pod before termination, or document that obfuscate-only mode requires an uploadTarget/PVC sink."
+      },
+      {
+        "type": "Testability",
+        "quote": "As an OpenShift cluster administrator, I want to set `obfuscate.enabled: true` on my MustGather CR",
+        "suggestion": "User stories are narrative-only. Map each story to at least one traceable Given/When/Then acceptance criterion (the E2E test plan partially substitutes but lacks explicit AC IDs linked to stories)."
+      },
+      {
+        "type": "Ambiguity",
+        "quote": "Should `obfuscate.enabled: true` without an `uploadTarget` and without `obfuscate.source` be rejected via CEL validation?",
+        "suggestion": "Resolve open question #2 before implementation: either add CEL rules rejecting invalid combinations or document allowed gather+obfuscate-to-emptyDir behavior explicitly."
+      },
+      {
+        "type": "Ambiguity",
+        "quote": "Custom config validation is deferred to runtime",
+        "suggestion": "Document expected failure UX when ConfigMap is missing or malformed (CR condition vs Job failure only) and whether admission webhook validation is in or out of scope for Tech Preview."
+      },
+      {
+        "type": "Testability",
+        "quote": "Verify the original PVC contents are untouched and cleaned output is in the staging directory",
+        "suggestion": "Mode 2 E2E should specify how testers access staging output given emptyDir lifecycle ends with the Job pod; add concrete verification steps."
+      }
+    ],
+    "blockers": [],
+    "non_blockers": [
+      "Four open questions remain (custom must-gather images, CEL validation, CR status report surfacing, ConfigMap admission validation) — acceptable for proposal stage but should be resolved in specs.md",
+      "Obfuscation progress not reported in CR status is a documented non-goal; future enhancement tracked separately",
+      "Jira acceptance criterion ('Proposal is reviewed and approved') is meta; functional acceptance is covered by the detailed test plan and graduation criteria"
+    ]
+  }
+}

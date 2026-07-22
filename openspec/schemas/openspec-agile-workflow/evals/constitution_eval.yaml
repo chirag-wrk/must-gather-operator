@@ -1,0 +1,85 @@
+stage: constitution
+template: evals/refined-templates/constitution-template.md
+artifact: constitution.md
+version: 1
+eval_count: 3
+evals:
+  - id: eval-r001-con-001
+    round: 1
+    stage: constitution
+    source_issue_ids: [ISSUE-004]
+    patterns: [PAT-005]
+    input_refs:
+      - evals/evals/outputs/epic-bug-analysis/issue-taxonomy.json
+    prompt: |
+      Does the constitution include a principle about status condition naming conventions
+      that requires distinct condition types for different failure categories?
+
+      The constitution must:
+      1. Include a principle (with repo evidence) about status condition types
+      2. Prohibit using a single generic condition type (e.g., ReconcileError) for all
+         failure modes
+      3. Cite existing condition type patterns in the repository as evidence
+    assertions:
+      must_mention:
+        - "condition type"
+        - "distinct"
+        - "failure"
+        - "status"
+    scoring:
+      method: weighted_checklist
+      pass_threshold: 80
+
+  - id: eval-r001-con-002
+    round: 1
+    stage: constitution
+    source_issue_ids: [ISSUE-001, ISSUE-003]
+    patterns: [PAT-002, PAT-003]
+    input_refs:
+      - evals/evals/outputs/epic-bug-analysis/rca-summary.md
+    prompt: |
+      Does the constitution include a principle about multi-container pod consistency
+      that requires mount and env var configuration to be applied uniformly across all
+      containers sharing a volume?
+
+      The constitution must:
+      1. Include a principle about shared volume consistency (gather + upload containers)
+      2. Require that any volume mount changes apply to ALL containers sharing the volume
+      3. Include guidance on user-facing field sanitization (edge-case handling)
+    assertions:
+      must_mention:
+        - "shared volume"
+        - "container"
+        - "consistency"
+        - "mount"
+    scoring:
+      method: weighted_checklist
+      pass_threshold: 80
+
+  - id: eval-r001-con-003
+    round: 1
+    stage: constitution
+    source_issue_ids: [ISSUE-005]
+    patterns: [PAT-006]
+    input_refs:
+      - evals/evals/outputs/epic-bug-analysis/issue-taxonomy.json
+    prompt: |
+      Does the constitution include a principle or constraint about environment variable
+      default validation that requires fail-fast behavior when required defaults are
+      empty or unset?
+
+      The constitution must:
+      1. Include a principle or additional constraint about validating env var defaults
+      2. Require that operator-critical env vars (e.g., DEFAULT_MUST_GATHER_IMAGE,
+         OPERATOR_IMAGE) are validated non-empty at startup or first use
+      3. Specify that empty defaults must result in a clear error (condition or log),
+         not silent creation of broken resources
+    assertions:
+      must_mention:
+        - "environment variable"
+        - "default"
+        - "empty"
+        - "validation"
+    scoring:
+      method: weighted_checklist
+      pass_threshold: 80

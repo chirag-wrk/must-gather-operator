@@ -1,0 +1,29 @@
+artifact_id: validation
+artifact_path: openspec/changes/mg-293/validation.json
+stage: validation
+stage_eval_file: null
+gate: rubric_only
+scored_at: "2026-07-22T06:35:00Z"
+overall_score: 89
+overall_pass: true
+refinement_round: 1
+rubric:
+  completeness_score: 91
+  quality_score: 86
+  pass_threshold: 80
+  overall_status: PASS
+cases:
+  - id: rubric-completeness
+    score: 91
+    pass: true
+    failures: []
+  - id: rubric-quality
+    score: 86
+    pass: true
+    failures:
+      - "Mode 2 staging output retrieval mechanism not defined"
+      - "User stories lack formal Given/When/Then linkage to test plan"
+  - id: rubric-blockers
+    score: 100
+    pass: true
+    failures: []

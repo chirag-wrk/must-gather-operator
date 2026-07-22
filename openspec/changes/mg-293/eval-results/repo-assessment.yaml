@@ -1,0 +1,21 @@
+artifact_id: repo-assessment
+artifact_path: openspec/changes/mg-293/repo-assessment.md
+stage: repo-assessment
+stage_eval_file: evals/repo-assessment_eval.yaml
+scored_at: "2026-07-22T06:45:00Z"
+overall_score: 97
+overall_pass: true
+refinement_round: 1
+cases:
+  - id: eval-r001-ra-001
+    score: 100
+    pass: true
+    failures: []
+  - id: eval-r001-ra-002
+    score: 95
+    pass: true
+    failures: []
+  - id: eval-r001-ra-003
+    score: 96
+    pass: true
+    failures: []
