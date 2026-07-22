@@ -13,7 +13,7 @@ rules:
       - get
       - list
       - watch
-  # leader election
+  # leader election and obfuscation policy ConfigMaps (obfuscationConfigRef in operator namespace)
   - apiGroups:
       - ""
     resources:

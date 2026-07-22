@@ -1,0 +1,32 @@
+# Mode 2: obfuscate existing bundle on PVC → SFTP upload (no new gather).
+# Spec: SC-005 (redact and upload from persistent storage without re-collection).
+#
+# Prerequisites:
+#   - Service account permitted to run the obfuscate/upload Job.
+#   - PVC in the same namespace as this CR containing an existing must-gather bundle.
+#   - Case-management secret in this CR's namespace when uploadTarget is set.
+#   - Optional obfuscationConfigRef: ConfigMap in operator namespace (must-gather-operator).
+#
+# Mode 3 variant: omit uploadTarget to obfuscate only (staging volume output; Tech Preview).
+# subPath must be non-empty when set; empty or whitespace-only values are sanitized at Job runtime.
+#
+# See examples/README.md for Mode 1 examples (SC-001–SC-004).
+apiVersion: operator.openshift.io/v1alpha1
+kind: MustGather
+metadata:
+  name: example-mustgather-obfuscate-source-pvc
+spec:
+  serviceAccountName: must-gather-admin
+  obfuscate:
+    enabled: true
+    source:
+      claim:
+        name: must-gather-pvc
+      subPath: existing-must-gather-bundle
+  uploadTarget:
+    type: SFTP
+    sftp:
+      caseID: '04230315'
+      caseManagementAccountSecretRef:
+        name: case-management-creds
+      internalUser: true

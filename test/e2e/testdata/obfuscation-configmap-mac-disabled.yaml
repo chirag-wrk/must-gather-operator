@@ -1,0 +1,18 @@
+# SC-004 fixture: custom policy without MAC obfuscation so upload output differs from default.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: must-gather-clean-config-mac-disabled-e2e
+  namespace: must-gather-operator
+  labels:
+    test: obfuscate-e2e
+data:
+  config.yaml: |
+    config:
+      obfuscate:
+        - type: IP
+          replacementType: Consistent
+      omit:
+        - type: Kubernetes
+          kubernetesResource:
+            kind: Secret

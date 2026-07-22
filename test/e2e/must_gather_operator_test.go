@@ -49,6 +49,7 @@ type MustGatherCROptions struct {
 	Timeout          *time.Duration
 	ImageStreamRef   *mustgatherv1alpha1.ImageStreamTagRef
 	GatherSpec       *mustgatherv1alpha1.GatherSpec
+	Obfuscate        *ObfuscateOptions
 }
 
 // UploadTargetOptions configures SFTP upload target
@@ -3705,6 +3706,16 @@ func containerHasTrustedCAMount(c corev1.Container) bool {
 
 // createMustGatherCR builds and creates a MustGather custom resource with the given parameters.
 func createMustGatherCR(name, namespace, serviceAccountName string, retainResources bool, opts *MustGatherCROptions) *mustgatherv1alpha1.MustGather {
+	mg := buildMustGatherCR(name, namespace, serviceAccountName, retainResources, opts)
+
+	err := nonAdminClient.Create(testCtx, mg)
+	Expect(err).NotTo(HaveOccurred(), "Failed to create MustGather CR")
+
+	return mg
+}
+
+// buildMustGatherCR constructs a MustGather CR without persisting it (for helper tests).
+func buildMustGatherCR(name, namespace, serviceAccountName string, retainResources bool, opts *MustGatherCROptions) *mustgatherv1alpha1.MustGather {
 	mg := &mustgatherv1alpha1.MustGather{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -3757,10 +3768,9 @@ func createMustGatherCR(name, namespace, serviceAccountName string, retainResour
 		if opts.GatherSpec != nil {
 			mg.Spec.GatherSpec = opts.GatherSpec
 		}
-	}
 
-	err := nonAdminClient.Create(testCtx, mg)
-	Expect(err).NotTo(HaveOccurred(), "Failed to create MustGather CR")
+		applyObfuscateSpec(mg, opts.Obfuscate)
+	}
 
 	return mg
 }

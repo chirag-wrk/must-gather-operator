@@ -1,0 +1,10 @@
+config:
+  obfuscate:
+    - type: IP
+      replacementType: Consistent
+    - type: MAC
+      replacementType: Consistent
+  omit:
+    - type: Kubernetes
+      kubernetesResource:
+        kind: Secret

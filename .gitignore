@@ -88,3 +88,8 @@ saas-must-gather-operator-bundle
 # IDE
 .idea
 test/e2e/test-run-results/
+openspec/
+# ─── Dashboard runtime artifacts ───
+.cursor/
+dashboard/
+eval-generation/

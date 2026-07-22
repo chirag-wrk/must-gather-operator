@@ -27,6 +27,8 @@ import (
 // MustGatherSpec defines the desired state of MustGather
 // +kubebuilder:validation:XValidation:rule="!(has(self.imageStreamRef) && has(self.gatherSpec) && has(self.gatherSpec.audit) && self.gatherSpec.audit)",message="audit mode is only supported with the default must-gather image"
 // +kubebuilder:validation:XValidation:rule="!(!has(self.imageStreamRef) && has(self.gatherSpec) && has(self.gatherSpec.command) && size(self.gatherSpec.command) > 0 && has(self.gatherSpec.audit) && self.gatherSpec.audit)",message="audit mode cannot be combined with custom gather commands"
+// +kubebuilder:validation:XValidation:rule="!(has(self.obfuscate) && has(self.obfuscate.enabled) && self.obfuscate.enabled && !has(self.obfuscate.source) && !has(self.uploadTarget))",message="obfuscate.enabled requires either obfuscate.source or uploadTarget"
+// +kubebuilder:validation:XValidation:rule="!(has(self.obfuscate) && has(self.obfuscate.source) && (!has(self.obfuscate.enabled) || !self.obfuscate.enabled))",message="obfuscate.source requires obfuscate.enabled to be true"
 type MustGatherSpec struct {
 	// ServiceAccountName is the name of the ServiceAccount to use for running the must-gather Job.
 	// This field is required and must reference a ServiceAccount with sufficient RBAC permissions
@@ -67,8 +69,19 @@ type MustGatherSpec struct {
 	// The storage configuration for persisting the collected must-gather tar archive.
 	// If not specified, an ephemeral volume is used which will not persist
 	// the tar archive on the cluster.
+	// When obfuscation is combined with gather output on a PVC, per-run isolation uses
+	// storage.persistentVolume.subPath together with a runtime directoryName subPath
+	// (see outputSubPath in the Job template); each MustGather invocation writes to a
+	// distinct directory on the shared PVC.
 	// +optional
 	Storage *Storage `json:"storage,omitempty"`
+
+	// Obfuscate configures post-gather obfuscation of sensitive data (IPs, MACs,
+	// Secrets, ConfigMaps) before upload using must-gather-clean.
+	// When obfuscate.enabled is true, the operator runs obfuscation on the collected
+	// or referenced bundle before tarring and uploading.
+	// +optional
+	Obfuscate *ObfuscateConfig `json:"obfuscate,omitempty"`
 }
 
 // GatherSpec allows specifying the execution details for a must-gather run and the collection behavior.
@@ -205,6 +218,64 @@ type PersistentVolumeClaimReference struct {
 	// +kubebuilder:validation:XValidation:rule="!format.dns1123Subdomain().validate(self).hasValue()",message="a lowercase RFC 1123 subdomain must consist of lower case alphanumeric characters, '-' or '.', and must start and end with an alphanumeric character."
 	// +required
 	Name string `json:"name"`
+}
+
+// ObfuscateConfig configures obfuscation of a must-gather bundle before upload.
+//
+// Validation failures at CR create/update time (OpenAPI/CEL):
+//   - FR-012: obfuscate.enabled requires either obfuscate.source or uploadTarget.
+//   - FR-013: obfuscate.source requires obfuscate.enabled to be true.
+//   - Empty obfuscate.source.subPath is rejected at admission (minLength); whitespace-only
+//     subPath values are sanitized at Job runtime.
+//
+// Runtime failures after the Job starts are reported via distinct status condition types
+// (implemented in a later phase): ObfuscationConfigInvalid for invalid or missing
+// must-gather-clean configuration, and ObfuscationFailed for obfuscation execution errors.
+// These are separate from the generic ReconcileError condition used for other reconcile failures.
+//
+// Volume semantics: when obfuscate.source is set, the source PVC mount is read-only; cleaned
+// output is written to the upload staging volume before tarring and upload.
+type ObfuscateConfig struct {
+	// Enabled activates obfuscation of the must-gather bundle.
+	// When true, the operator runs must-gather-clean on the collected or referenced
+	// bundle before tarring and uploading.
+	// +kubebuilder:default:=false
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// ObfuscationConfigRef references a ConfigMap in the operator namespace containing
+	// a must-gather-clean configuration file. The ConfigMap must have a key named
+	// "config.yaml" with a valid must-gather-clean obfuscation config.
+	// If omitted, the operator uses the built-in default config.
+	// +optional
+	ObfuscationConfigRef *corev1.LocalObjectReference `json:"obfuscationConfigRef,omitempty"`
+
+	// Source references an existing must-gather bundle on a PVC for obfuscation
+	// without running a new gather. The PVC contents are read-only; cleaned output
+	// is written to the upload staging volume. When spec.storage is used for gather
+	// output, per-run directoryName subPath isolation applies separately from source.subPath.
+	// +optional
+	Source *ObfuscateSourceConfig `json:"source,omitempty"`
+}
+
+// ObfuscateSourceConfig defines an existing must-gather bundle to obfuscate without gather.
+//
+// The referenced PVC is mounted read-only in the Job; obfuscated output is written to the
+// upload staging volume. This is independent of spec.storage gather PVC isolation, which
+// uses storage.persistentVolume.subPath plus a per-run directoryName subPath when persisting
+// gather output on a shared PVC.
+type ObfuscateSourceConfig struct {
+	// Claim references the PersistentVolumeClaim containing the existing must-gather
+	// bundle to obfuscate. The PVC must be in the same namespace as the MustGather CR.
+	// +required
+	Claim PersistentVolumeClaimReference `json:"claim"`
+
+	// SubPath is the path within the PVC where the must-gather bundle is located.
+	// If omitted, the root of the PVC is used. Empty string is rejected at admission;
+	// whitespace-only values are trimmed at runtime in the Job template (see outputSubPath semantics).
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	SubPath string `json:"subPath,omitempty"`
 }
 
 // MustGatherStatus defines the observed state of MustGather

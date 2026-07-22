@@ -1,0 +1,27 @@
+# Mode 1 with custom policy: gather → obfuscate (ConfigMap policy) → SFTP upload.
+# Spec: SC-004 (upload output reflects custom must-gather-clean policy, e.g. MAC handling).
+#
+# Prerequisites:
+#   - Service account with cluster gather permissions.
+#   - Case-management secret in this CR's namespace.
+#   - ConfigMap in operator namespace (must-gather-operator) named below, with key
+#     config.yaml containing a valid must-gather-clean configuration.
+#
+# See examples/README.md for default-policy Mode 1 and source-PVC Mode 2 (SC-005).
+apiVersion: operator.openshift.io/v1alpha1
+kind: MustGather
+metadata:
+  name: example-mustgather-obfuscate-custom-config
+spec:
+  serviceAccountName: must-gather-admin
+  obfuscate:
+    enabled: true
+    obfuscationConfigRef:
+      name: must-gather-clean-config
+  uploadTarget:
+    type: SFTP
+    sftp:
+      caseID: '02527285'
+      caseManagementAccountSecretRef:
+        name: case-management-creds
+      internalUser: true

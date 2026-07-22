@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: must-gather-clean-config-invalid-e2e
+  namespace: must-gather-operator
+  labels:
+    test: obfuscate-e2e
+data:
+  policy.yaml: |
+    config:
+      obfuscate: []

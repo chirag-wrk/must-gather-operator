@@ -1,0 +1,25 @@
+# Default obfuscation policy for must-gather-operator (Tech Preview).
+#
+# Shipped in the operator image at:
+#   /etc/must-gather-clean/default-config.yaml
+# Must match pkg/obfuscate.DefaultObfuscateConfigPath.
+#
+# FR-005: Consistent IP and MAC obfuscation; omit Kubernetes Secret and ConfigMap resources.
+# FR-006: Loopback and local addresses (127.0.0.1, 0.0.0.0, ::1) are preserved by
+#         must-gather-clean built-in IP obfuscator defaults — do not add rules here that
+#         would alter that behavior.
+#
+# Schema: https://github.com/openshift/must-gather-clean#configuration
+config:
+  obfuscate:
+    - type: IP
+      replacementType: Consistent
+    - type: MAC
+      replacementType: Consistent
+  omit:
+    - type: Kubernetes
+      kubernetesResource:
+        kind: Secret
+    - type: Kubernetes
+      kubernetesResource:
+        kind: ConfigMap

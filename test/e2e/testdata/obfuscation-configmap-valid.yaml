@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: must-gather-clean-config-e2e
+  namespace: must-gather-operator
+  labels:
+    test: obfuscate-e2e
+data:
+  config.yaml: |
+    config:
+      obfuscate:
+        - type: IP
+          replacementType: Consistent
+        - type: MAC
+          replacementType: Consistent
+      omit:
+        - type: Kubernetes
+          kubernetesResource:
+            kind: Secret
+        - type: Kubernetes
+          kubernetesResource:
+            kind: ConfigMap

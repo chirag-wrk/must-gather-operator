@@ -367,6 +367,60 @@ func TestHandleJobCompletion(t *testing.T) {
 				if out.Status.Status != "Failed" || !out.Status.Completed || out.Status.Reason != "MustGather Job pods failed" {
 					t.Fatalf("unexpected status: %+v", out.Status)
 				}
+				for _, cond := range out.Status.Conditions {
+					if cond.Type == ConditionObfuscationFailed {
+						t.Fatal("ObfuscationFailed condition must not be set when obfuscation is disabled")
+					}
+				}
+				chkJob := &batchv1.Job{}
+				if err := cl.Get(context.TODO(), types.NamespacedName{Name: "example-mustgather", Namespace: operatorNs}, chkJob); err == nil {
+					t.Fatalf("expected job to be deleted after cleanup")
+				}
+			},
+		},
+		{
+			name:   "failed_status_with_obfuscate_sets_obfuscation_failed_condition",
+			status: "Failed",
+			reason: "MustGather Job pods failed",
+			setupObjects: func() []client.Object {
+				enabled := true
+				mg := &mustgatherv1alpha1.MustGather{
+					ObjectMeta: metav1.ObjectMeta{Name: "example-mustgather", Namespace: operatorNs, UID: "mg-uid-obf-fail", Generation: 1},
+					Spec: mustgatherv1alpha1.MustGatherSpec{
+						Obfuscate: &mustgatherv1alpha1.ObfuscateConfig{Enabled: &enabled},
+					},
+				}
+				job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: mg.Name, Namespace: operatorNs, UID: "uid-obf-fail", OwnerReferences: []metav1.OwnerReference{mustGatherOwnerRef(mg)}}}
+				return []client.Object{mg, job}
+			},
+			interceptors: func() interceptClient { return interceptClient{} },
+			expectError:  false,
+			postTestChecks: func(t *testing.T, cl client.Client) {
+				out := &mustgatherv1alpha1.MustGather{}
+				if err := cl.Get(context.TODO(), types.NamespacedName{Name: "example-mustgather", Namespace: operatorNs}, out); err != nil {
+					t.Fatalf("failed to get mustgather: %v", err)
+				}
+				if out.Status.Status != "Failed" || !out.Status.Completed {
+					t.Fatalf("unexpected status: %+v", out.Status)
+				}
+				var foundObfuscationFailed bool
+				for _, cond := range out.Status.Conditions {
+					if cond.Type == ConditionObfuscationFailed {
+						foundObfuscationFailed = true
+						if cond.Status != metav1.ConditionTrue {
+							t.Fatalf("expected ObfuscationFailed status True, got %v", cond.Status)
+						}
+						if cond.Reason != "JobFailed" {
+							t.Fatalf("expected reason JobFailed, got %q", cond.Reason)
+						}
+					}
+					if cond.Type == "ReconcileError" {
+						t.Fatal("obfuscation Job failure must not set generic ReconcileError condition")
+					}
+				}
+				if !foundObfuscationFailed {
+					t.Fatal("expected ObfuscationFailed condition to be set")
+				}
 				chkJob := &batchv1.Job{}
 				if err := cl.Get(context.TODO(), types.NamespacedName{Name: "example-mustgather", Namespace: operatorNs}, chkJob); err == nil {
 					t.Fatalf("expected job to be deleted after cleanup")

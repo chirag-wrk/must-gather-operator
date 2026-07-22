@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.16.4
+    controller-gen.kubebuilder.io/version: v0.17.2
   name: mustgathers.operator.openshift.io
 spec:
   group: operator.openshift.io
@@ -107,6 +107,75 @@ spec:
                   Will default to no time limit.
                 format: duration
                 type: string
+              obfuscate:
+                description: |-
+                  Obfuscate configures post-gather obfuscation of sensitive data (IPs, MACs,
+                  Secrets, ConfigMaps) before upload using must-gather-clean.
+                  When obfuscate.enabled is true, the operator runs obfuscation on the collected
+                  or referenced bundle before tarring and uploading.
+                properties:
+                  enabled:
+                    default: false
+                    description: |-
+                      Enabled activates obfuscation of the must-gather bundle.
+                      When true, the operator runs must-gather-clean on the collected or referenced
+                      bundle before tarring and uploading.
+                    type: boolean
+                  obfuscationConfigRef:
+                    description: |-
+                      ObfuscationConfigRef references a ConfigMap in the operator namespace containing
+                      a must-gather-clean configuration file. The ConfigMap must have a key named
+                      "config.yaml" with a valid must-gather-clean obfuscation config.
+                      If omitted, the operator uses the built-in default config.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  source:
+                    description: |-
+                      Source references an existing must-gather bundle on a PVC for obfuscation
+                      without running a new gather. The PVC contents are read-only; cleaned output
+                      is written to the upload staging volume. When spec.storage is used for gather
+                      output, per-run directoryName subPath isolation applies separately from source.subPath.
+                    properties:
+                      claim:
+                        description: |-
+                          Claim references the PersistentVolumeClaim containing the existing must-gather
+                          bundle to obfuscate. The PVC must be in the same namespace as the MustGather CR.
+                        properties:
+                          name:
+                            description: |-
+                              name defines the PersistentVolumeClaim to use,
+                              should be already present in the same namespace.
+                            maxLength: 253
+                            type: string
+                            x-kubernetes-validations:
+                            - message: a lowercase RFC 1123 subdomain must consist
+                                of lower case alphanumeric characters, '-' or '.',
+                                and must start and end with an alphanumeric character.
+                              rule: '!format.dns1123Subdomain().validate(self).hasValue()'
+                        required:
+                        - name
+                        type: object
+                      subPath:
+                        description: |-
+                          SubPath is the path within the PVC where the must-gather bundle is located.
+                          If omitted, the root of the PVC is used. Empty string is rejected at admission;
+                          whitespace-only values are trimmed at runtime in the Job template (see outputSubPath semantics).
+                        minLength: 1
+                        type: string
+                    required:
+                    - claim
+                    type: object
+                type: object
               retainResourcesOnCompletion:
                 default: false
                 description: |-
@@ -239,6 +308,12 @@ spec:
               rule: '!(!has(self.imageStreamRef) && has(self.gatherSpec) && has(self.gatherSpec.command)
                 && size(self.gatherSpec.command) > 0 && has(self.gatherSpec.audit)
                 && self.gatherSpec.audit)'
+            - message: obfuscate.enabled requires either obfuscate.source or uploadTarget
+              rule: '!(has(self.obfuscate) && has(self.obfuscate.enabled) && self.obfuscate.enabled
+                && !has(self.obfuscate.source) && !has(self.uploadTarget))'
+            - message: obfuscate.source requires obfuscate.enabled to be true
+              rule: '!(has(self.obfuscate) && has(self.obfuscate.source) && (!has(self.obfuscate.enabled)
+                || !self.obfuscate.enabled))'
           status:
             description: MustGatherStatus defines the observed state of MustGather
             properties:

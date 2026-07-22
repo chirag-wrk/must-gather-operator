@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -84,6 +85,7 @@ var errImageValidation = goerror.New("image validation failed")
 //+kubebuilder:rbac:groups=apps,resources=deployments/finalizers,verbs=update
 //+kubebuilder:rbac:groups=image.openshift.io,resources=imagestreams,verbs=get;list;watch
 //+kubebuilder:rbac:groups="",resources=pods;services;services/finalizers;endpoints;persistentvolumeclaims;events;configmaps;secrets,verbs=get;list;watch;create;update;patch;delete
+// ConfigMap read (get/list/watch) includes obfuscationConfigRef policies in the operator namespace (FR-007).
 //+kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch
 // ServiceAccount read access needed for pre-flight validation before Job creation
 
@@ -266,6 +268,23 @@ func (r *MustGatherReconciler) Reconcile(ctx context.Context, request reconcile.
 			reqLogger.Info("SFTP credentials validated successfully")
 		}
 
+		obfuscationReason, obfuscationErr := r.validateObfuscationConfigRef(ctx, instance)
+		if obfuscationErr != nil {
+			if obfuscationReason != "" {
+				reqLogger.Error(obfuscationErr, "obfuscation config validation failed")
+				return r.setObfuscationFailureStatus(
+					ctx,
+					reqLogger,
+					instance,
+					ConditionObfuscationConfigInvalid,
+					obfuscationReason,
+					obfuscationErr.Error(),
+				)
+			}
+			reqLogger.Error(obfuscationErr, "failed to get obfuscation ConfigMap (transient error, will retry)")
+			return reconcile.Result{Requeue: true}, obfuscationErr
+		}
+
 		// job is not there, create it.
 		err = r.CreateResourceIfNotExists(ctx, instance, instance.Namespace, job)
 		if err != nil {
@@ -307,13 +326,27 @@ func (r *MustGatherReconciler) Reconcile(ctx context.Context, request reconcile.
 }
 
 func (r *MustGatherReconciler) handleJobCompletion(ctx context.Context, reqLogger logr.Logger, instance *mustgatherv1alpha1.MustGather, status string, reason string) (reconcile.Result, error) {
-	instance.Status.Status = status
-	instance.Status.Completed = true
-	instance.Status.Reason = reason
-	err := r.GetClient().Status().Update(ctx, instance)
-	if err != nil {
-		reqLogger.Error(err, "unable to update instance", "instance", instance.Name)
-		return r.ManageError(ctx, instance, err)
+	if status == "Failed" && obfuscateEnabled(instance.Spec.Obfuscate) {
+		result, err := r.setObfuscationFailureStatus(
+			ctx,
+			reqLogger,
+			instance,
+			ConditionObfuscationFailed,
+			"JobFailed",
+			reason,
+		)
+		if err != nil {
+			return result, err
+		}
+	} else {
+		instance.Status.Status = status
+		instance.Status.Completed = true
+		instance.Status.Reason = reason
+		err := r.GetClient().Status().Update(ctx, instance)
+		if err != nil {
+			reqLogger.Error(err, "unable to update instance", "instance", instance.Name)
+			return r.ManageError(ctx, instance, err)
+		}
 	}
 
 	if instance.Spec.RetainResourcesOnCompletion == nil || !*instance.Spec.RetainResourcesOnCompletion {
@@ -403,15 +436,15 @@ func (r *MustGatherReconciler) getJobFromInstance(ctx context.Context, reqLogger
 
 	// Inject the operator image URI from the pod's env variables
 	operatorImage, varPresent := os.LookupEnv("OPERATOR_IMAGE")
-	if !varPresent {
-		err := goerror.New("operator image environment variable not found")
+	if !varPresent || strings.TrimSpace(operatorImage) == "" {
+		err := goerror.New("operator image environment variable not found or empty")
 		reqLogger.Error(err, "Error: no operator image found for job template")
 		return nil, err
 	}
 
 	directoryName := mustgatherutil.GenerateMustGatherDirectoryName(ctx, r.GetClient(), time.Now())
 
-	return getJobTemplate(image, operatorImage, *instance, r.TrustedCAConfigMap, directoryName), nil
+	return getJobTemplate(image, operatorImage, *instance, r.TrustedCAConfigMap, directoryName, r.OperatorNamespace), nil
 }
 
 func (r *MustGatherReconciler) getMustGatherImage(ctx context.Context, instance *mustgatherv1alpha1.MustGather) (string, error) {

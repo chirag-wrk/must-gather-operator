@@ -7,6 +7,8 @@
 # caseid: the case id to upload to
 # must_gather_output: the directory in which the must gather agents have collected the information
 # must_gather_upload: a workspace directory that can be used as stage to zip and upload the must gather compressed file
+# obfuscate: when set to "true", run must-gather-clean obfuscation before archiving (Phase 3 upload container env)
+# obfuscate_config: optional path to obfuscation policy YAML; forwarded as --config when obfuscate is enabled
 
 set -o errexit
 
@@ -65,8 +67,55 @@ if [ -n "${http_proxy}" ] || [ -n "${https_proxy}" ]; then
 fi
 
 
-if [ -z "${caseid}" ] || [ -z "${username}" ] || [ -z "${password}" ];
-then
+if [ "${obfuscate}" = "true" ]; then
+  echo "Running obfuscation"
+  OBFUSCATE_BIN="must-gather-operator"
+  if ! command -v "${OBFUSCATE_BIN}" >/dev/null 2>&1; then
+    if [ -x "/usr/local/bin/must-gather-operator" ]; then
+      OBFUSCATE_BIN="/usr/local/bin/must-gather-operator"
+    else
+      echo "Error: must-gather-operator binary not found; cannot run obfuscation"
+      exit 1
+    fi
+  fi
+  OBFUSCATE_OUTPUT="${must_gather_upload}/cleaned"
+  mkdir -p "${OBFUSCATE_OUTPUT}"
+  OBFUSCATE_CONFIG=$(echo "${obfuscate_config:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  if [ -n "${OBFUSCATE_CONFIG}" ]; then
+    "${OBFUSCATE_BIN}" obfuscate \
+      --input "${must_gather_output}" \
+      --output "${OBFUSCATE_OUTPUT}" \
+      --config "${OBFUSCATE_CONFIG}" \
+      -v=3
+  else
+    "${OBFUSCATE_BIN}" obfuscate \
+      --input "${must_gather_output}" \
+      --output "${OBFUSCATE_OUTPUT}" \
+      -v=3
+  fi
+  echo "Obfuscation complete"
+  must_gather_output="${OBFUSCATE_OUTPUT}"
+  if [ ! -d "${must_gather_output}" ] || [ -z "$(ls -A "${must_gather_output}" 2>/dev/null)" ]; then
+    echo "Error: Obfuscated output directory is missing or empty: ${must_gather_output}"
+    exit 1
+  fi
+fi
+
+UPLOAD_CRED_COUNT=0
+[ -n "${caseid}" ] && UPLOAD_CRED_COUNT=$((UPLOAD_CRED_COUNT + 1))
+[ -n "${username}" ] && UPLOAD_CRED_COUNT=$((UPLOAD_CRED_COUNT + 1))
+[ -n "${password}" ] && UPLOAD_CRED_COUNT=$((UPLOAD_CRED_COUNT + 1))
+
+if [ "${obfuscate}" = "true" ]; then
+  if [ "${UPLOAD_CRED_COUNT}" -eq 0 ]; then
+    echo "Obfuscation complete; no upload target configured"
+    exit 0
+  fi
+  if [ "${UPLOAD_CRED_COUNT}" -ne 3 ]; then
+    echo "Error: Partial upload credentials provided; caseid, username, and password must all be set for upload"
+    exit 1
+  fi
+elif [ "${UPLOAD_CRED_COUNT}" -ne 3 ]; then
   echo "Error: Required Parameters have not been provided. Exiting..."
   exit 1
 fi
