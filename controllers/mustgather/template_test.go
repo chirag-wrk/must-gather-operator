@@ -22,6 +22,10 @@ const (
 	wellKnownCADirForTest = "/etc/pki/tls/certs"
 	// canonical to `outputVolumeName`, de-coupled for test.
 	knownStorageVolumeMountNameForTest = "must-gather-output"
+	// obfuscation environment variable names
+	uploadEnvObfuscate          = "OBFUSCATE"
+	uploadEnvObfuscationConfig  = "OBFUSCATE_CONFIG"
+	uploadEnvObfuscateSource    = "OBFUSCATE_SOURCE"
 )
 
 func Test_initializeJobTemplate(t *testing.T) {
@@ -222,7 +226,7 @@ func Test_getGatherContainer(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			container := getGatherContainer(tt.mustGatherImage, tt.audit, tt.timeout, tt.storage, tt.caConfigMap, tt.timeFilter, tt.command, tt.args, tt.directoryName)
+			container := getGatherContainer(tt.mustGatherImage, tt.audit, tt.timeout, tt.storage, tt.caConfigMap, tt.timeFilter, tt.command, tt.args, tt.directoryName, false)
 
 			if len(tt.command) == 0 {
 				containerCommand := container.Command[2]
@@ -442,7 +446,7 @@ func Test_getUploadContainer(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			testFailed := false
-			container := getUploadContainer(tt.operatorImage, tt.caseId, tt.host, tt.internalUser, tt.storage, tt.httpProxy, tt.httpsProxy, tt.noProxy, tt.secretKeyRefName, tt.mountCAConfigMap, tt.directoryName)
+			container := getUploadContainer(tt.operatorImage, tt.caseId, tt.host, tt.internalUser, tt.storage, tt.httpProxy, tt.httpsProxy, tt.noProxy, tt.secretKeyRefName, tt.mountCAConfigMap, tt.directoryName, false, nil)
 
 			if container.Image != tt.operatorImage {
 				t.Fatalf("expected container image %v but got %v", tt.operatorImage, container.Image)
@@ -823,4 +827,172 @@ func envValues(container v1.Container) map[string]string {
 		m[e.Name] = e.Value
 	}
 	return m
+}
+
+func Test_getJobTemplate_Obfuscation(t *testing.T) {
+	t.Setenv(DefaultMustGatherImageEnv, "quay.io/foo/bar/must-gather:latest")
+
+	enabledTrue := true
+	enabledFalse := false
+
+	tests := []struct {
+		name                     string
+		obfuscate                *mustgatherv1alpha1.ObfuscateConfig
+		storage                  *mustgatherv1alpha1.Storage
+		wantObfuscateEnabled     bool
+		wantObfuscationConfigRef string
+		wantObfuscateSource      bool
+	}{
+		{
+			name:                 "obfuscation disabled",
+			obfuscate:            &mustgatherv1alpha1.ObfuscateConfig{Enabled: &enabledFalse},
+			wantObfuscateEnabled: false,
+		},
+		{
+			name:                 "obfuscation enabled with default config",
+			obfuscate:            &mustgatherv1alpha1.ObfuscateConfig{Enabled: &enabledTrue},
+			wantObfuscateEnabled: true,
+		},
+		{
+			name: "obfuscation enabled with custom config",
+			obfuscate: &mustgatherv1alpha1.ObfuscateConfig{
+				Enabled: &enabledTrue,
+				ObfuscationConfigRef: &v1.LocalObjectReference{
+					Name: "custom-config",
+				},
+			},
+			wantObfuscateEnabled:     true,
+			wantObfuscationConfigRef: "custom-config",
+		},
+		{
+			name: "obfuscation enabled with source mode",
+			obfuscate: &mustgatherv1alpha1.ObfuscateConfig{
+				Enabled: &enabledTrue,
+				Source: &mustgatherv1alpha1.ObfuscateSourceConfig{
+					Claim: mustgatherv1alpha1.PersistentVolumeClaimReference{
+						Name: "my-bundle-pvc",
+					},
+				},
+			},
+			wantObfuscateEnabled: true,
+			wantObfuscateSource:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mg := mustgatherv1alpha1.MustGather{
+				ObjectMeta: metav1.ObjectMeta{Name: "mg", Namespace: "ns"},
+				Spec: mustgatherv1alpha1.MustGatherSpec{
+					ServiceAccountName: "default",
+					Obfuscate:          tt.obfuscate,
+					Storage:            tt.storage,
+					UploadTarget: &mustgatherv1alpha1.UploadTargetSpec{
+						Type: mustgatherv1alpha1.UploadTypeSFTP,
+						SFTP: &mustgatherv1alpha1.SFTPSpec{
+							CaseID: "1234",
+							Host:   "sftp.example.com",
+							CaseManagementAccountSecretRef: v1.LocalObjectReference{
+								Name: "case-mgmt-secret",
+							},
+						},
+					},
+				},
+			}
+
+			job := getJobTemplate("img", "operator-image", mg, "", "must-gather.local.test.20240101T120000Z.000001")
+			gather := findGatherContainerInJob(t, job)
+			upload := findUploadContainerInJob(t, job)
+
+			// Check OBFUSCATE env var in upload container
+			uploadEnv := envValues(upload)
+			if tt.wantObfuscateEnabled {
+				if uploadEnv[uploadEnvObfuscate] != "true" {
+					t.Fatalf("expected OBFUSCATE=true, got %v", uploadEnv[uploadEnvObfuscate])
+				}
+			} else {
+				if _, ok := uploadEnv[uploadEnvObfuscate]; ok {
+					t.Fatalf("did not expect OBFUSCATE env var when obfuscation is disabled")
+				}
+			}
+
+			// Check OBFUSCATE_CONFIG env var in upload container
+			if tt.wantObfuscationConfigRef != "" {
+				if uploadEnv[uploadEnvObfuscationConfig] != "/etc/must-gather-clean/config/config.yaml" {
+					t.Fatalf("expected OBFUSCATE_CONFIG=/etc/must-gather-clean/config/config.yaml, got %v", uploadEnv[uploadEnvObfuscationConfig])
+				}
+			}
+
+			// Check OBFUSCATE_SOURCE env var in upload container
+			if tt.wantObfuscateSource {
+				if uploadEnv[uploadEnvObfuscateSource] != "/must-gather-source" {
+					t.Fatalf("expected OBFUSCATE_SOURCE=/must-gather-source, got %v", uploadEnv[uploadEnvObfuscateSource])
+				}
+			}
+
+			// Check chown command in gather container when obfuscation enabled
+			if tt.wantObfuscateEnabled {
+				foundChown := false
+				for _, cmd := range gather.Command {
+					if strings.Contains(cmd, "chown -R 65534:65534 /must-gather") {
+						foundChown = true
+						break
+					}
+				}
+				if !foundChown {
+					t.Fatalf("expected chown command in gather container when obfuscation is enabled")
+				}
+			}
+
+			// Check ConfigMap mount for obfuscation config
+			if tt.wantObfuscationConfigRef != "" {
+				foundConfigMap := false
+				for _, v := range job.Spec.Template.Spec.Volumes {
+					if v.ConfigMap != nil && v.ConfigMap.Name == tt.wantObfuscationConfigRef {
+						foundConfigMap = true
+						break
+					}
+				}
+				if !foundConfigMap {
+					t.Fatalf("expected ConfigMap volume for obfuscation config")
+				}
+
+				foundConfigMount := false
+				for _, vm := range upload.VolumeMounts {
+					if vm.Name == "obfuscate-config" && vm.MountPath == "/etc/must-gather-clean/config" {
+						foundConfigMount = true
+						break
+					}
+				}
+				if !foundConfigMount {
+					t.Fatalf("expected ConfigMap volume mount in upload container")
+				}
+			}
+
+			// Check PVC mount for source mode
+			if tt.wantObfuscateSource && tt.storage == nil {
+				foundPVC := false
+				for _, v := range job.Spec.Template.Spec.Volumes {
+					if v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == "my-bundle-pvc" {
+						foundPVC = true
+						break
+					}
+				}
+				if !foundPVC {
+					t.Fatalf("expected PVC volume for source mode")
+				}
+
+				foundPVCMount := false
+				for _, vm := range upload.VolumeMounts {
+					if vm.Name == "obfuscate-source" && vm.MountPath == "/must-gather-source" {
+						foundPVCMount = true
+						break
+					}
+				}
+				if !foundPVCMount {
+					t.Fatalf("expected PVC volume mount in upload container for source mode")
+				}
+			}
+		})
+	}
 }

@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.16.4
+    controller-gen.kubebuilder.io/version: v0.17.3
   name: mustgathers.operator.openshift.io
 spec:
   group: operator.openshift.io
@@ -107,6 +107,65 @@ spec:
                   Will default to no time limit.
                 format: duration
                 type: string
+              obfuscate:
+                description: |-
+                  obfuscate configures automatic obfuscation of sensitive data in must-gather bundles.
+                  When enabled, IPs, MACs, Secrets, and ConfigMaps are redacted from the bundle before upload.
+                properties:
+                  enabled:
+                    default: false
+                    description: |-
+                      enabled activates obfuscation of the must-gather bundle.
+                      When true, the bundle is obfuscated before upload (if uploadTarget is set)
+                      or stored in a staging area (if source is set for obfuscation-only mode).
+                    type: boolean
+                  obfuscationConfigRef:
+                    description: |-
+                      obfuscationConfigRef references a ConfigMap containing custom obfuscation configuration.
+                      If not specified, the default obfuscation configuration is used.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  source:
+                    description: |-
+                      source references an existing must-gather bundle on persistent storage for obfuscation without collection.
+                      When set, no new gather occurs — only obfuscation runs on the existing bundle.
+                    properties:
+                      claim:
+                        description: claim defines the PersistentVolumeClaim containing
+                          the must-gather bundle to obfuscate.
+                        properties:
+                          name:
+                            description: |-
+                              name defines the PersistentVolumeClaim to use,
+                              should be already present in the same namespace.
+                            maxLength: 253
+                            type: string
+                            x-kubernetes-validations:
+                            - message: a lowercase RFC 1123 subdomain must consist
+                                of lower case alphanumeric characters, '-' or '.',
+                                and must start and end with an alphanumeric character.
+                              rule: '!format.dns1123Subdomain().validate(self).hasValue()'
+                        required:
+                        - name
+                        type: object
+                      subPath:
+                        description: subPath defines the path to a sub directory within
+                          the PersistentVolume to use.
+                        type: string
+                    required:
+                    - claim
+                    type: object
+                type: object
               retainResourcesOnCompletion:
                 default: false
                 description: |-
@@ -239,6 +298,13 @@ spec:
               rule: '!(!has(self.imageStreamRef) && has(self.gatherSpec) && has(self.gatherSpec.command)
                 && size(self.gatherSpec.command) > 0 && has(self.gatherSpec.audit)
                 && self.gatherSpec.audit)'
+            - message: obfuscate.source requires obfuscate.enabled to be true
+              rule: '!(has(self.obfuscate) && has(self.obfuscate.source) && !(has(self.obfuscate.enabled)
+                && self.obfuscate.enabled))'
+            - message: obfuscate.enabled requires either uploadTarget or obfuscate.source
+                to be set
+              rule: '!(has(self.obfuscate) && has(self.obfuscate.enabled) && self.obfuscate.enabled
+                && !has(self.uploadTarget) && !has(self.obfuscate.source))'
           status:
             description: MustGatherStatus defines the observed state of MustGather
             properties:

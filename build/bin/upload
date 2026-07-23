@@ -22,6 +22,32 @@ fi
 KNOWN_HOSTS_PATH="/tmp/must-gather-operator/.ssh/known_hosts"
 SFTP_OPTIONS="-o BatchMode=no -o StrictHostKeyChecking=no -o UserKnownHostsFile=${KNOWN_HOSTS_PATH} "
 
+# Check if obfuscation is enabled
+if [ "${OBFUSCATE}" = "true" ]; then
+  echo "Obfuscation is enabled, running obfuscation step..."
+  
+  # Create output directory for obfuscated content
+  OBFUSCATE_OUTPUT="${must_gather_upload}/obfuscated"
+  mkdir -p "${OBFUSCATE_OUTPUT}"
+  
+  # Build obfuscate command arguments
+  OBFUSCATE_ARGS="--input ${must_gather_output} --output ${OBFUSCATE_OUTPUT}"
+  
+  # Add config path if specified
+  if [ -n "${OBFUSCATE_CONFIG}" ]; then
+    OBFUSCATE_ARGS="${OBFUSCATE_ARGS} --config ${OBFUSCATE_CONFIG}"
+  fi
+  
+  # Run obfuscation
+  echo "Running obfuscation: must-gather-operator obfuscate ${OBFUSCATE_ARGS}"
+  must-gather-operator obfuscate ${OBFUSCATE_ARGS}
+  
+  # Update must_gather_output to use obfuscated content for archiving
+  must_gather_output="${OBFUSCATE_OUTPUT}"
+  
+  echo "Obfuscation completed successfully"
+fi
+
 # Setup proxy command if proxy environment variables are set
 PROXY_COMMAND=""
 if [ -n "${http_proxy}" ] || [ -n "${https_proxy}" ]; then

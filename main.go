@@ -36,6 +36,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	"github.com/openshift/must-gather-clean/pkg/cli"
 	"github.com/openshift/must-gather-operator/config"
 	"github.com/openshift/must-gather-operator/version"
 	osdmetrics "github.com/openshift/operator-custom-metrics/pkg/metrics"
@@ -87,7 +88,57 @@ func init() {
 	//+kubebuilder:scaffold:scheme
 }
 
+// runObfuscate wraps the must-gather-clean library to obfuscate sensitive data in must-gather bundles.
+// It takes inputPath (path to the must-gather bundle), outputPath (path to write the obfuscated output),
+// and configPath (path to obfuscation configuration file, empty for defaults).
+func runObfuscate(inputPath, outputPath, configPath string) error {
+	// Use default worker count based on CPU limits
+	workerCount := 4
+	
+	// Run the obfuscation using the must-gather-clean library
+	// deleteOutputFolder=false because we want to preserve the output directory structure
+	// reportingFolder is set to outputPath to include the report in the output
+	return cli.Run(configPath, inputPath, outputPath, false, outputPath, workerCount)
+}
+
 func main() {
+	// Check if the first argument is "obfuscate" to run the obfuscate subcommand
+	if len(os.Args) > 1 && os.Args[1] == "obfuscate" {
+		// Parse obfuscate-specific flags
+		obfuscateCmd := flag.NewFlagSet("obfuscate", flag.ExitOnError)
+		inputPath := obfuscateCmd.String("input", "", "Path to the must-gather bundle to obfuscate")
+		outputPath := obfuscateCmd.String("output", "", "Path to write the obfuscated output")
+		configPath := obfuscateCmd.String("config", "", "Path to obfuscation configuration file (optional)")
+		
+		// Parse the remaining arguments (skip the "obfuscate" subcommand)
+		if err := obfuscateCmd.Parse(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "Error parsing obfuscate flags: %v\n", err)
+			os.Exit(1)
+		}
+		
+		// Validate required flags
+		if *inputPath == "" {
+			fmt.Fprintln(os.Stderr, "Error: --input flag is required")
+			obfuscateCmd.Usage()
+			os.Exit(1)
+		}
+		if *outputPath == "" {
+			fmt.Fprintln(os.Stderr, "Error: --output flag is required")
+			obfuscateCmd.Usage()
+			os.Exit(1)
+		}
+		
+		// Run the obfuscation
+		if err := runObfuscate(*inputPath, *outputPath, *configPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Error running obfuscation: %v\n", err)
+			os.Exit(1)
+		}
+		
+		fmt.Println("Obfuscation completed successfully")
+		return
+	}
+	
+	// Original operator logic
 	// var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string
