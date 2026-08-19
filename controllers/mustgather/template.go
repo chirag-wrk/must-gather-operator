@@ -29,8 +29,18 @@ const (
 
 	gatherCommandBinaryAudit   = "gather_audit_logs"
 	gatherCommandBinaryNoAudit = "gather"
-	gatherCommand              = "timeout %v bash -x -c -- '/usr/bin/%v' 2>&1 | tee /must-gather/must-gather.log\n\nstatus=$?\nif [[ $status -eq 124 || $status -eq 137 ]]; then\n  echo \"Gather timed out.\"\n  exit 0\nfi | tee -a /must-gather/must-gather.log"
-	gatherContainerName        = "gather"
+	gatherExitMarkerFile       = "/must-gather/.gather_exit"
+	gatherCommand              = "set -o pipefail\n" +
+		"timeout %v bash -x -c -- '/usr/bin/%v' 2>&1 | tee /must-gather/must-gather.log\n" +
+		"status=$?\n" +
+		"echo \"${status}\" > " + gatherExitMarkerFile + "\n" +
+		"if [[ $status -eq 124 || $status -eq 137 ]]; then\n" +
+		"  echo \"Gather timed out.\"\n" +
+		"  echo 0 > " + gatherExitMarkerFile + "\n" +
+		"  exit 0\n" +
+		"fi\n" +
+		"exit $status"
+	gatherContainerName = "gather"
 
 	// Environment variables for time-based log filtering
 	gatherEnvSince     = "MUST_GATHER_SINCE"
@@ -49,7 +59,17 @@ const (
 	uploadEnvMustGatherOutput = "must_gather_output"
 	uploadEnvMustGatherUpload = "must_gather_upload"
 	uploadEnvFilenamePrefix   = "FILENAME_PREFIX"
-	uploadCommand             = "count=0\nuntil [ $count -gt 4 ]\ndo\n  while `pgrep -a gather > /dev/null`\n  do\n    echo \"waiting for gathers to complete ...\"\n    sleep 120\n    count=0\n  done\n  echo \"no gather is running ($count / 4)\"\n  ((count++))\n  sleep 30\ndone\n/usr/local/bin/upload"
+	uploadCommand = "count=0\nuntil [ $count -gt 4 ]\ndo\n  while `pgrep -a gather > /dev/null`\n  do\n    echo \"waiting for gathers to complete ...\"\n    sleep 120\n    count=0\n  done\n  echo \"no gather is running ($count / 4)\"\n  ((count++))\n  sleep 30\ndone\n" +
+		"if [ ! -f " + gatherExitMarkerFile + " ]; then\n" +
+		"  echo \"Gather exit status file missing; refusing upload.\"\n" +
+		"  exit 1\n" +
+		"fi\n" +
+		"gather_exit=$(cat " + gatherExitMarkerFile + ")\n" +
+		"if [ \"${gather_exit}\" != \"0\" ]; then\n" +
+		"  echo \"Gather failed with exit code ${gather_exit}; skipping upload.\"\n" +
+		"  exit 1\n" +
+		"fi\n" +
+		"/usr/local/bin/upload"
 	uploadCommandDirect       = "/usr/local/bin/upload"
 
 	// SSH directory and known hosts file

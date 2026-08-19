@@ -1,0 +1,276 @@
+{
+  "exported_at": "2026-08-19T08:16:22.781130+00:00",
+  "operator_name": "must-gather-operator",
+  "jira_epic_link": "https://issues.redhat.com/browse/MG-297",
+  "jira_epic_name": "Integrate must-gather-clean with must-gather-operator",
+  "jira_task_name": "Fix Must-gather upload runs after gather process exits without verifying gather succeeded, allowing partial/failed bundles to be obfuscated and uploaded",
+  "Jira_task_link": "https://issues.redhat.com/browse/MG-357",
+  "run": {
+    "id": "956be802-ed8f-481e-8c8f-e6b3aac7cfa3",
+    "change_name": "MG-357 \u2014 mg-357",
+    "jira_key": "MG-357",
+    "branch": "feature/mg-357",
+    "primary_model": "",
+    "status": "completed",
+    "started_at": "2026-08-19T06:43:30.083752+00:00",
+    "completed_at": "2026-08-19T08:16:22.759557+00:00",
+    "total_tokens_in": 32032,
+    "total_tokens_out": 4038
+  },
+  "phases": [
+    {
+      "id": "4f76f6d3-9fe7-4200-be7b-92c3720a19f3",
+      "run_id": "956be802-ed8f-481e-8c8f-e6b3aac7cfa3",
+      "phase_number": 4,
+      "phase_name": "subtask_creation",
+      "status": "passed",
+      "started_at": "2026-08-19T07:05:25.774918+00:00",
+      "completed_at": "2026-08-19T07:06:26.305150+00:00",
+      "tokens_in": 18972,
+      "tokens_out": 3310,
+      "quality_score": 94.0,
+      "quality_label": "PASS",
+      "iteration_count": 1,
+      "duration_s": 60.5,
+      "processing_time_s": 60.5
+    },
+    {
+      "id": "3a943124-45eb-4415-86a4-862ade5bb1de",
+      "run_id": "956be802-ed8f-481e-8c8f-e6b3aac7cfa3",
+      "phase_number": 5,
+      "phase_name": "code_generation",
+      "status": "passed",
+      "started_at": "2026-08-19T07:50:20.199627+00:00",
+      "completed_at": "2026-08-19T08:16:22.759273+00:00",
+      "tokens_in": 13060,
+      "tokens_out": 728,
+      "quality_score": 0,
+      "quality_label": "batch: implementation report complete (2 task reports)",
+      "iteration_count": 1,
+      "duration_s": 1562.6,
+      "processing_time_s": 0.0
+    }
+  ],
+  "tasks": [
+    {
+      "id": "1fb5cfcc-ffc7-4585-b017-05e26137e1a6",
+      "run_id": "956be802-ed8f-481e-8c8f-e6b3aac7cfa3",
+      "phase_id": "3a943124-45eb-4415-86a4-862ade5bb1de",
+      "task_id": "T1_1",
+      "task_title": "Fix gather/upload coordination in template.go with unit tests",
+      "agent_id": "Job Template",
+      "status": "passed",
+      "started_at": "2026-08-19T07:50:20.418565+00:00",
+      "completed_at": "2026-08-19T07:57:42.281343+00:00",
+      "tokens_in": 11417,
+      "tokens_out": 400,
+      "self_correction_loops": 0,
+      "processing_time_s": 441.6,
+      "attribution": null,
+      "verification_pass": true,
+      "verification_command": "go test",
+      "verification_result": "SKIP",
+      "verification_output": "| Task acceptance criteria: PASSED"
+    },
+    {
+      "id": "d64e9494-cd31-4f44-b614-f2d7383e0f55",
+      "run_id": "956be802-ed8f-481e-8c8f-e6b3aac7cfa3",
+      "phase_id": "3a943124-45eb-4415-86a4-862ade5bb1de",
+      "task_id": "T1_2",
+      "task_title": "E2E gather-failure regression test",
+      "agent_id": "Testing",
+      "status": "passed",
+      "started_at": "2026-08-19T08:05:13.780006+00:00",
+      "completed_at": "2026-08-19T08:11:46.461565+00:00",
+      "tokens_in": 11417,
+      "tokens_out": 328,
+      "self_correction_loops": 0,
+      "processing_time_s": 392.5,
+      "attribution": null,
+      "verification_pass": true,
+      "verification_command": "go test",
+      "verification_result": "SKIP",
+      "verification_output": "| Task acceptance criteria: PASSED"
+    }
+  ],
+  "events": [
+    {
+      "id": "8caed7a0-3d69-4bf7-81bf-70c301f4024b",
+      "ts": "2026-08-19T06:47:43.654580+00:00",
+      "run_id": "956be802-ed8f-481e-8c8f-e6b3aac7cfa3",
+      "task_id": null,
+      "agent_id": "Pipeline",
+      "event_type": "state_machine",
+      "message": "Artifact 'bug-validation' created \u2014 awaiting eval gate",
+      "metadata_json": null
+    },
+    {
+      "id": "b50acd58-d8b6-4197-b6d1-30b44950a554",
+      "ts": "2026-08-19T06:48:26.459353+00:00",
+      "run_id": "956be802-ed8f-481e-8c8f-e6b3aac7cfa3",
+      "task_id": null,
+      "agent_id": "Pipeline",
+      "event_type": "state_machine",
+      "message": "Artifact 'bug-validation' ready for approval (eval score: 95.0%) \u2014 waiting for human decision",
+      "metadata_json": null
+    },
+    {
+      "id": "3bd21cd3-a318-4c92-8bad-d9940e887dc6",
+      "ts": "2026-08-19T06:53:14.033799+00:00",
+      "run_id": "956be802-ed8f-481e-8c8f-e6b3aac7cfa3",
+      "task_id": null,
+      "agent_id": "Pipeline",
+      "event_type": "state_machine",
+      "message": "Artifact 'bug-report' created \u2014 awaiting eval gate",
+      "metadata_json": null
+    },
+    {
+      "id": "8110b1c1-ac95-4103-b4e2-ce32e2884b7b",
+      "ts": "2026-08-19T06:53:14.268779+00:00",
+      "run_id": "956be802-ed8f-481e-8c8f-e6b3aac7cfa3",
+      "task_id": null,
+      "agent_id": "Pipeline",
+      "event_type": "state_machine",
+      "message": "Artifact 'bug-report' ready for approval (eval score: 94.0%) \u2014 waiting for human decision",
+      "metadata_json": null
+    },
+    {
+      "id": "301fa19d-d43a-4b65-9004-dea0b5c443ab",
+      "ts": "2026-08-19T06:57:20.107271+00:00",
+      "run_id": "956be802-ed8f-481e-8c8f-e6b3aac7cfa3",
+      "task_id": null,
+      "agent_id": "Pipeline",
+      "event_type": "state_machine",
+      "message": "Artifact 'repro-verification' created \u2014 awaiting eval gate",
+      "metadata_json": null
+    },
+    {
+      "id": "d480862f-7099-47c4-a4d9-8ddad0f08c4d",
+      "ts": "2026-08-19T06:57:20.337016+00:00",
+      "run_id": "956be802-ed8f-481e-8c8f-e6b3aac7cfa3",
+      "task_id": null,
+      "agent_id": "Pipeline",
+      "event_type": "state_machine",
+      "message": "Artifact 'repro-verification' ready for approval (eval score: 92.0%) \u2014 waiting for human decision",
+      "metadata_json": null
+    },
+    {
+      "id": "e557a045-3bad-4b7b-959e-73432fdbba75",
+      "ts": "2026-08-19T07:00:07.126060+00:00",
+      "run_id": "956be802-ed8f-481e-8c8f-e6b3aac7cfa3",
+      "task_id": null,
+      "agent_id": "Pipeline",
+      "event_type": "state_machine",
+      "message": "Artifact 'rca' created \u2014 awaiting eval gate",
+      "metadata_json": null
+    },
+    {
+      "id": "c663bd88-be39-42b5-b63c-a0c59895c7f9",
+      "ts": "2026-08-19T07:00:07.353616+00:00",
+      "run_id": "956be802-ed8f-481e-8c8f-e6b3aac7cfa3",
+      "task_id": null,
+      "agent_id": "Pipeline",
+      "event_type": "state_machine",
+      "message": "Artifact 'rca' ready for approval (eval score: 95.0%) \u2014 waiting for human decision",
+      "metadata_json": null
+    },
+    {
+      "id": "e16c905e-c55f-4077-9a18-21e2bfba9db7",
+      "ts": "2026-08-19T07:05:26.207905+00:00",
+      "run_id": "956be802-ed8f-481e-8c8f-e6b3aac7cfa3",
+      "task_id": null,
+      "agent_id": "Pipeline",
+      "event_type": "state_machine",
+      "message": "Artifact 'tasks' created \u2014 awaiting eval gate",
+      "metadata_json": null
+    },
+    {
+      "id": "562c2e63-bbeb-469d-8216-0e58c1ddb1b2",
+      "ts": "2026-08-19T07:05:26.435570+00:00",
+      "run_id": "956be802-ed8f-481e-8c8f-e6b3aac7cfa3",
+      "task_id": null,
+      "agent_id": "Pipeline",
+      "event_type": "state_machine",
+      "message": "Artifact 'tasks' ready for approval (eval score: 94.0%) \u2014 waiting for human decision",
+      "metadata_json": null
+    },
+    {
+      "id": "9c511a5e-32ea-4234-96ec-1929517d700c",
+      "ts": "2026-08-19T07:06:26.304583+00:00",
+      "run_id": "956be802-ed8f-481e-8c8f-e6b3aac7cfa3",
+      "task_id": null,
+      "agent_id": "Pipeline",
+      "event_type": "state_machine",
+      "message": "Human approved artifact 'tasks'",
+      "metadata_json": null
+    },
+    {
+      "id": "616c2d87-1265-488c-9787-51db47901558",
+      "ts": "2026-08-19T07:06:26.304923+00:00",
+      "run_id": "956be802-ed8f-481e-8c8f-e6b3aac7cfa3",
+      "task_id": null,
+      "agent_id": "Pipeline",
+      "event_type": "state_machine",
+      "message": "Artifact 'tasks' completed with status: passed",
+      "metadata_json": null
+    },
+    {
+      "id": "def7bd52-d9d8-4150-85b3-7b5758e07566",
+      "ts": "2026-08-19T08:16:22.758924+00:00",
+      "run_id": "956be802-ed8f-481e-8c8f-e6b3aac7cfa3",
+      "task_id": null,
+      "agent_id": "Pipeline",
+      "event_type": "state_machine",
+      "message": "Phase 5 completing in batch mode \u2014 tokens estimated at phase level",
+      "metadata_json": null
+    }
+  ],
+  "global_health": {
+    "total_tokens_consumed": 36070,
+    "estimated_cost_usd": 0.1567,
+    "cumulative_wall_time_s": 5572.7,
+    "agent_processing_time_s": 60.5,
+    "compliance_index": 94.0,
+    "gate_passing_rate": 100.0,
+    "human_rejection_rate": 0.0,
+    "total_refinement_iterations": 0,
+    "agent_success_rate": 100.0,
+    "tasks_passed": 2,
+    "tasks_total": 2
+  },
+  "artifact_edits": {
+    "artifacts": [
+      {
+        "artifact_id": "tasks",
+        "phase_name": "subtask_creation",
+        "eval_refinements": 0,
+        "feedback_rounds": 0,
+        "total_edits": 0
+      }
+    ],
+    "total_edits": 0
+  },
+  "verification_summary": {
+    "entries": [
+      {
+        "task_id": "T1_1",
+        "task_title": "Fix gather/upload coordination in template.go with unit tests",
+        "verification_pass": true,
+        "verification_command": "go test",
+        "verification_result": "SKIP",
+        "verification_output": "| Task acceptance criteria: PASSED"
+      },
+      {
+        "task_id": "T1_2",
+        "task_title": "E2E gather-failure regression test",
+        "verification_pass": true,
+        "verification_command": "go test",
+        "verification_result": "SKIP",
+        "verification_output": "| Task acceptance criteria: PASSED"
+      }
+    ],
+    "total_verified": 2,
+    "total_passed": 2,
+    "total_failed": 0
+  }
+}

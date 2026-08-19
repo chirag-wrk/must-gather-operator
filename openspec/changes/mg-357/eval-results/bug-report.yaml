@@ -1,0 +1,36 @@
+artifact_id: bug-report
+artifact_path: openspec/changes/mg-357/bug-report.md
+stage: bug-report
+stage_eval_file: evals/bug-report_eval.yaml
+gate: stage_evals
+scored_at: "2026-08-19T06:52:00Z"
+overall_score: 94
+overall_pass: true
+refinement_round: 1
+note: bug-report_eval.yaml evals list is empty; scored against template self-check rubric
+cases:
+  - id: rubric-repro-steps
+    score: 95
+    pass: true
+    failures: []
+  - id: rubric-expected-actual
+    score: 100
+    pass: true
+    failures: []
+  - id: rubric-epic-ard
+    score: 90
+    pass: true
+    failures: []
+  - id: rubric-pr-context
+    score: 92
+    pass: true
+    failures:
+      - "PR author/merge dates not available — sourced from git log only"
+  - id: rubric-assumptions
+    score: 95
+    pass: true
+    failures: []
+  - id: rubric-no-rca-speculation
+    score: 100
+    pass: true
+    failures: []

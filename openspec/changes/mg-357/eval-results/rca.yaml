@@ -1,0 +1,36 @@
+artifact_id: rca
+artifact_path: openspec/changes/mg-357/rca-report.md
+stage: rca
+stage_eval_file: evals/rca_eval.yaml
+gate: stage_evals
+scored_at: "2026-08-19T07:00:00Z"
+overall_score: 95
+overall_pass: true
+refinement_round: 1
+note: rca_eval.yaml evals list is empty; scored against template self-check rubric
+cases:
+  - id: rubric-root-cause-distinct
+    score: 100
+    pass: true
+    failures: []
+  - id: rubric-failure-trace-depth
+    score: 100
+    pass: true
+    failures: []
+  - id: rubric-evidence-references
+    score: 95
+    pass: true
+    failures: []
+  - id: rubric-affected-components
+    score: 95
+    pass: true
+    failures: []
+  - id: rubric-fix-recommendation
+    score: 95
+    pass: true
+    failures: []
+  - id: rubric-ard-pr-context
+    score: 90
+    pass: true
+    failures:
+      - "pr-diffs/ not ingested — PR summary from git log only"

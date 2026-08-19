@@ -1,0 +1,38 @@
+{
+  "run_id": "956be802-ed8f-481e-8c8f-e6b3aac7cfa3",
+  "jira_key": "MG-357",
+  "change": "mg-357",
+  "phases": {
+    "4": {
+      "id": "4f76f6d3-9fe7-4200-be7b-92c3720a19f3",
+      "name": "subtask_creation",
+      "ended": true,
+      "agent_started_at": "2026-08-19T07:05:25.775252+00:00",
+      "tokens_in": 9486,
+      "tokens_out": 1655,
+      "processing_time_s": 60.5
+    },
+    "5": {
+      "id": "3a943124-45eb-4415-86a4-862ade5bb1de",
+      "name": "code_generation",
+      "ended": true,
+      "agent_started_at": "2026-08-19T07:50:20.199930+00:00",
+      "processing_time_s": 834.1,
+      "tokens_in": 22834,
+      "tokens_out": 728,
+      "batch_mode": true,
+      "batch_detected_at": "2026-08-19T08:16:22.715916+00:00"
+    }
+  },
+  "tasks": {
+    "T1_1": "1fb5cfcc-ffc7-4585-b017-05e26137e1a6",
+    "T1_2": "d64e9494-cd31-4f44-b614-f2d7383e0f55"
+  },
+  "plan_phase": {
+    "current": 1
+  },
+  "task_times": {
+    "T1_1": "2026-08-19T07:50:20.418883+00:00",
+    "T1_2": "2026-08-19T08:05:13.780301+00:00"
+  }
+}

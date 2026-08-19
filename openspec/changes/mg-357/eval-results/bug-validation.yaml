@@ -1,0 +1,31 @@
+artifact_id: bug-validation
+artifact_path: openspec/changes/mg-357/bug-validation.json
+stage: bug-validation
+stage_eval_file: null
+gate: rubric_only
+scored_at: "2026-08-19T06:47:43Z"
+overall_score: 95
+overall_pass: true
+refinement_round: 1
+rubric_checks:
+  - id: valid-json-schema
+    score: 100
+    pass: true
+    failures: []
+  - id: scoring-math
+    score: 100
+    pass: true
+    failures: []
+  - id: status-gate-logic
+    score: 100
+    pass: true
+    failures: []
+  - id: no-fabrication
+    score: 100
+    pass: true
+    failures: []
+  - id: input-grounding
+    score: 75
+    pass: true
+    failures:
+      - "Minor: non_blockers could note acceptance criteria coverage as strength"

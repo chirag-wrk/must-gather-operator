@@ -1,0 +1,40 @@
+artifact_id: tasks
+artifact_path: openspec/changes/mg-357/tasks.md
+stage: tasks
+stage_eval_file: evals/tasks_eval.yaml
+gate: stage_evals
+scored_at: "2026-08-19T07:05:00Z"
+overall_score: 94
+overall_pass: true
+refinement_round: 1
+note: tasks_eval.yaml evals list is empty; scored against template self-check rubric
+task_sizing:
+  min: 2
+  max: 8
+  consolidation_threshold: 2
+  task_count: 2
+cases:
+  - id: rubric-sections-complete
+    score: 100
+    pass: true
+    failures: []
+  - id: rubric-rca-coverage
+    score: 95
+    pass: true
+    failures: []
+  - id: rubric-unit-tests-co-generated
+    score: 100
+    pass: true
+    failures: []
+  - id: rubric-dag-linear-order
+    score: 95
+    pass: true
+    failures: []
+  - id: rubric-sme-decisions-recorded
+    score: 90
+    pass: true
+    failures: []
+  - id: rubric-orchestration-notes
+    score: 90
+    pass: true
+    failures: []

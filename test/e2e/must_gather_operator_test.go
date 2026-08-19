@@ -4162,6 +4162,121 @@ echo "=== sample obfuscated content ===" && find /pvc/collections -path '*/clean
 		})
 	})
 
+	ginkgo.Context("Gather failure prevents obfuscation and upload (MG-357)", func() {
+		ginkgo.It("should fail the Job and MustGather when gather command exits non-zero", func() {
+			pvcName := fmt.Sprintf("obf-fail-pvc-%d", time.Now().UnixNano()%100000)
+			ginkgo.By("Creating a PVC for gather-failure regression test")
+			pvc := &corev1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      pvcName,
+					Namespace: ns.Name,
+					Labels:    map[string]string{"test": nonAdminLabel},
+				},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceStorage: resource.MustParse("2Gi"),
+						},
+					},
+				},
+			}
+			err := nonAdminClient.Create(testCtx, pvc)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create PVC for gather-failure test")
+			defer func() { _ = nonAdminClient.Delete(testCtx, pvc) }()
+
+			mgName := fmt.Sprintf("obf-gather-fail-%d", time.Now().UnixNano()%100000)
+			timeout := 10 * time.Minute
+			ginkgo.By("Creating MustGather CR with failing gather command and obfuscation enabled")
+			mustGatherCR := createMustGatherCR(mgName, ns.Name, serviceAccount, true, &MustGatherCROptions{
+				Timeout: &timeout,
+				PersistentVolume: &PersistentVolumeOptions{
+					PVCName: pvcName,
+					SubPath: "collections",
+				},
+				Obfuscate: &ObfuscateOptions{
+					Enabled: true,
+				},
+				GatherSpec: &mustgatherv1.GatherSpec{
+					Command: []string{"/bin/sh", "-c"},
+					Args:    []string{"echo 'simulated gather failure'; exit 1"},
+				},
+			})
+			defer func() {
+				_ = nonAdminClient.Delete(testCtx, mustGatherCR)
+				Eventually(func() bool {
+					return apierrors.IsNotFound(nonAdminClient.Get(testCtx,
+						client.ObjectKey{Name: mgName, Namespace: ns.Name},
+						&mustgatherv1.MustGather{}))
+				}).WithTimeout(2 * time.Minute).WithPolling(5 * time.Second).Should(BeTrue())
+			}()
+
+			job := &batchv1.Job{}
+			ginkgo.By("Waiting for Job to be created")
+			Eventually(func() error {
+				return adminClient.Get(testCtx, client.ObjectKey{Name: mgName, Namespace: ns.Name}, job)
+			}).WithTimeout(2*time.Minute).WithPolling(5*time.Second).Should(Succeed(),
+				"Operator should create the Job")
+
+			var mustGatherPod *corev1.Pod
+			ginkgo.By("Waiting for gather container to fail")
+			Eventually(func(g Gomega) {
+				podList := &corev1.PodList{}
+				g.Expect(nonAdminClient.List(testCtx, podList,
+					client.InNamespace(ns.Name),
+					client.MatchingLabels{jobNameLabelKey: mgName})).To(Succeed())
+				g.Expect(podList.Items).NotTo(BeEmpty(), "Pod should be created by Job")
+				mustGatherPod = &podList.Items[0]
+
+				var gatherTerminated bool
+				for _, cs := range mustGatherPod.Status.ContainerStatuses {
+					if cs.Name == gatherContainerName && cs.State.Terminated != nil {
+						gatherTerminated = true
+						g.Expect(cs.State.Terminated.ExitCode).NotTo(Equal(int32(0)),
+							"gather container should exit non-zero")
+					}
+				}
+				g.Expect(gatherTerminated).To(BeTrue(), "gather container should terminate with failure")
+			}).WithTimeout(5*time.Minute).WithPolling(5*time.Second).Should(Succeed())
+
+			ginkgo.By("Waiting for Job to fail after upload gate rejects gather failure")
+			Eventually(func(g Gomega) {
+				g.Expect(adminClient.Get(testCtx, client.ObjectKey{
+					Name: mgName, Namespace: ns.Name,
+				}, job)).To(Succeed())
+				g.Expect(job.Status.Failed).To(BeNumerically(">", 0),
+					"Job should report failed pod(s) when upload refuses after gather failure")
+			}).WithTimeout(15*time.Minute).WithPolling(10*time.Second).Should(Succeed())
+
+			ginkgo.By("Verifying MustGather CR status is Failed")
+			fetchedMG := &mustgatherv1.MustGather{}
+			Eventually(func(g Gomega) {
+				g.Expect(nonAdminClient.Get(testCtx, client.ObjectKey{
+					Name: mgName, Namespace: ns.Name,
+				}, fetchedMG)).To(Succeed())
+				g.Expect(fetchedMG.Status.Completed).To(BeTrue(), "MustGather should be marked completed")
+				g.Expect(fetchedMG.Status.Status).To(Equal("Failed"),
+					"MustGather should report Failed when gather fails")
+			}).WithTimeout(5*time.Minute).WithPolling(10*time.Second).Should(Succeed())
+
+			ginkgo.By("Verifying upload container logs show refusal without obfuscation")
+			uploadLogs, err := getContainerLogs(ns.Name, mustGatherPod.Name, uploadContainerName)
+			Expect(err).NotTo(HaveOccurred(), "Failed to get upload container logs")
+			ginkgo.GinkgoWriter.Printf("Upload container logs:\n%s\n", uploadLogs)
+
+			Expect(uploadLogs).To(Or(
+				ContainSubstring("Gather failed with exit code"),
+				ContainSubstring("Gather exit status file missing"),
+				ContainSubstring("skipping upload"),
+				ContainSubstring("refusing upload"),
+			), "upload container should refuse upload when gather fails")
+			Expect(uploadLogs).NotTo(ContainSubstring("Running obfuscation on"),
+				"obfuscation should not run when gather fails")
+			Expect(uploadLogs).NotTo(ContainSubstring("Obfuscation complete"),
+				"obfuscation should not complete when gather fails")
+		})
+	})
+
 	ginkgo.Context("Obfuscation ConfigMap lifecycle", func() {
 		ginkgo.It("should use obfuscation ConfigMap from CR namespace and set env var", func() {
 			configMapName := fmt.Sprintf("obf-cfg-%d", time.Now().UnixNano()%100000)

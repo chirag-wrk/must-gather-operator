@@ -1,0 +1,37 @@
+artifact_id: repro-verification
+artifact_path: openspec/changes/mg-357/repro-verification-report.md
+stage: repro-verification
+stage_eval_file: evals/repro-verification_eval.yaml
+gate: stage_evals
+scored_at: "2026-08-19T06:55:45Z"
+overall_score: 92
+overall_pass: true
+refinement_round: 1
+note: repro-verification_eval.yaml evals list is empty; scored against template self-check rubric
+cases:
+  - id: rubric-all-steps-documented
+    score: 90
+    pass: true
+    failures:
+      - "Step 1 SKIP due to no cluster — documented with reason"
+  - id: rubric-failure-signature
+    score: 100
+    pass: true
+    failures: []
+  - id: rubric-log-sources-accurate
+    score: 95
+    pass: true
+    failures: []
+  - id: rubric-no-rca-speculation
+    score: 100
+    pass: true
+    failures: []
+  - id: rubric-assessment-limitations
+    score: 95
+    pass: true
+    failures: []
+  - id: rubric-bug-confirmed-supported
+    score: 85
+    pass: true
+    failures:
+      - "Live cluster e2e not run; repo-local confirmation only"

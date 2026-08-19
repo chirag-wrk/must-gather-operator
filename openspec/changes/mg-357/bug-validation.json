@@ -1,0 +1,40 @@
+{
+  "metadata": {
+    "ticket_id": "MG-357",
+    "doc_type": "bug",
+    "pass_threshold": 80,
+    "output_mode": "json_plus_summary",
+    "weights_applied": { "completeness": 0.6, "quality": 0.4 }
+  },
+  "validation_results": {
+    "completeness_score": 78,
+    "quality_score": 90,
+    "overall_score": 83,
+    "overall_status": "PASS",
+    "missing_elements": [
+      "Severity/Priority: No explicit severity or priority classification (e.g., Critical/Major) with rationale beyond impact narrative"
+    ],
+    "quality_issues": [
+      {
+        "type": "Specificity",
+        "quote": "Use a gather image/command that fails or exits early (or simulate gather crash)",
+        "suggestion": "Provide a concrete gather image override or command snippet (e.g., a MustGather CR YAML with a failing gather command) so reproducers do not need to invent a failure scenario."
+      },
+      {
+        "type": "Reproducibility",
+        "quote": "How reproducible: Always (by design of current upload coordination)",
+        "suggestion": "Clarify whether reproduction requires a live OpenShift cluster with SFTP credentials or whether PVC-only obfuscation paths can be verified without SFTP access."
+      }
+    ],
+    "blockers": [],
+    "non_blockers": [
+      "No explicit OpenShift or operator version in environment details — add affected release(s) if known",
+      "No sample upload-container or gather-container log excerpts — include representative log lines showing pgrep debounce followed by upload despite gather failure",
+      "No original development PR URLs linked — optional for triage but useful for ARD extraction in bug-report stage"
+    ],
+    "linked_epic": "MG-297 — Integrate must-gather-clean with must-gather-operator",
+    "original_pr_urls": [],
+    "has_steps_to_reproduce": true,
+    "has_error_evidence": true
+  }
+}

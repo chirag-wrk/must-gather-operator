@@ -1168,6 +1168,99 @@ func findGatherContainerInJob(t *testing.T, job *batchv1.Job) v1.Container {
 }
 
 // helper to find upload container in a job
+func Test_gatherUploadCommand_GatherSuccessGate(t *testing.T) {
+	t.Run("default gather command propagates exit and writes marker", func(t *testing.T) {
+		if !strings.Contains(gatherCommand, "set -o pipefail") {
+			t.Fatal("expected gather command to enable pipefail")
+		}
+		if !strings.Contains(gatherCommand, gatherExitMarkerFile) {
+			t.Fatalf("expected gather command to write %s", gatherExitMarkerFile)
+		}
+		if !strings.Contains(gatherCommand, "exit $status") {
+			t.Fatal("expected gather command to exit with gather status")
+		}
+		// Timeout 124/137 still exit 0 per ADR-0002 — upload may proceed after timeout.
+		if !strings.Contains(gatherCommand, "status -eq 124") || !strings.Contains(gatherCommand, "status -eq 137") {
+			t.Fatal("expected gather command to handle timeout exit codes")
+		}
+	})
+
+	t.Run("upload command checks gather exit marker before upload", func(t *testing.T) {
+		if !strings.Contains(uploadCommand, gatherExitMarkerFile) {
+			t.Fatalf("expected upload command to read %s", gatherExitMarkerFile)
+		}
+		if !strings.Contains(uploadCommand, "refusing upload") {
+			t.Fatal("expected upload command to refuse upload when marker missing")
+		}
+		if !strings.Contains(uploadCommand, "skipping upload") {
+			t.Fatal("expected upload command to skip upload on gather failure")
+		}
+		idx := strings.LastIndex(uploadCommand, "/usr/local/bin/upload")
+		markerIdx := strings.Index(uploadCommand, gatherExitMarkerFile)
+		if markerIdx == -1 || idx == -1 || markerIdx > idx {
+			t.Fatal("expected gather exit check before invoking upload script")
+		}
+	})
+
+	t.Run("obfuscate source mode keeps direct upload command", func(t *testing.T) {
+		mg := mustgatherv1.MustGather{
+			ObjectMeta: metav1.ObjectMeta{Name: "mg", Namespace: "ns"},
+			Spec: mustgatherv1.MustGatherSpec{
+				ServiceAccountName: "default",
+				Obfuscate: &mustgatherv1.ObfuscateConfig{
+					Enabled: ToPtr(true),
+					Source: &mustgatherv1.PersistentVolumeConfig{
+						Claim: mustgatherv1.PersistentVolumeClaimReference{Name: "src-pvc"},
+					},
+				},
+				UploadTarget: &mustgatherv1.UploadTargetSpec{
+					Type: mustgatherv1.UploadTypeSFTP,
+					SFTP: &mustgatherv1.SFTPSpec{
+						CaseID: "1234",
+						CaseManagementAccountSecretRef: v1.LocalObjectReference{
+							Name: "secret",
+						},
+					},
+				},
+			},
+		}
+		job := getJobTemplate("img", "operator-image", mg, "", "must-gather.local.test.20240101T120000Z.000001")
+		upload := findUploadContainerInJob(t, job)
+		uploadCmd := upload.Command[2]
+		if !strings.Contains(uploadCmd, uploadCommandDirect) {
+			t.Fatalf("expected direct upload command for source mode, got %q", uploadCmd)
+		}
+		if strings.Contains(uploadCmd, gatherExitMarkerFile) {
+			t.Fatal("source mode must not require gather exit marker")
+		}
+	})
+
+	t.Run("gather job template includes gather success gate in upload command", func(t *testing.T) {
+		mg := mustgatherv1.MustGather{
+			ObjectMeta: metav1.ObjectMeta{Name: "mg", Namespace: "ns"},
+			Spec: mustgatherv1.MustGatherSpec{
+				ServiceAccountName: "default",
+				Obfuscate:          &mustgatherv1.ObfuscateConfig{Enabled: ToPtr(true)},
+				UploadTarget: &mustgatherv1.UploadTargetSpec{
+					Type: mustgatherv1.UploadTypeSFTP,
+					SFTP: &mustgatherv1.SFTPSpec{
+						CaseID: "1234",
+						CaseManagementAccountSecretRef: v1.LocalObjectReference{
+							Name: "secret",
+						},
+					},
+				},
+			},
+		}
+		job := getJobTemplate("img", "operator-image", mg, "", "must-gather.local.test.20240101T120000Z.000001")
+		upload := findUploadContainerInJob(t, job)
+		uploadCmd := upload.Command[2]
+		if !strings.Contains(uploadCmd, gatherExitMarkerFile) {
+			t.Fatalf("expected upload container command to check %s", gatherExitMarkerFile)
+		}
+	})
+}
+
 func findUploadContainerInJob(t *testing.T, job *batchv1.Job) v1.Container {
 	t.Helper()
 	for _, c := range job.Spec.Template.Spec.Containers {
